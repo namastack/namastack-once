@@ -1,0 +1,117 @@
+name: Prepare Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Version without v (for example 0.1.1 or 0.2.0-RC1)
+        required: true
+        type: string
+
+permissions:
+  actions: write
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: prepare-release
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      RELEASE_VERSION: ${{ inputs.version }}
+
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v6
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Set up Node.js 22
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+
+      - name: Test release tooling
+        run: node --test scripts/*.test.mjs
+
+      - name: Update project and example versions
+        run: node scripts/prepare-release.mjs "$RELEASE_VERSION"
+
+      - name: Validate generated changes
+        run: |
+          test "$(scripts/current-version.sh)" = "$RELEASE_VERSION"
+          git diff --check
+          if git diff --exit-code --quiet; then
+            echo "Release preparation did not change any files" >&2
+            exit 1
+          fi
+
+      - name: Create release branch and commit
+        id: release-branch
+        run: |
+          branch="release/$RELEASE_VERSION"
+          git add --all
+          desired_tree="$(git write-tree)"
+
+          if git ls-remote --exit-code --heads origin "$branch" >/dev/null 2>&1; then
+            git fetch --force origin "$branch:refs/remotes/origin/$branch"
+            remote_tree="$(git rev-parse "refs/remotes/origin/$branch^{tree}")"
+            if [[ "$remote_tree" != "$desired_tree" ]]; then
+              echo "Remote branch $branch exists with different release changes" >&2
+              exit 1
+            fi
+            echo "Reusing existing release branch $branch"
+          else
+            git config user.name "Namastack Release Automation"
+            git config user.email "info@rolandbeisel.de"
+            git switch --create "$branch"
+            git commit -m "Prepare release $RELEASE_VERSION"
+            git push --set-upstream origin "$branch"
+          fi
+
+          echo "branch=$branch" >> "$GITHUB_OUTPUT"
+
+      - name: Open release pull request
+        env:
+          RELEASE_BRANCH: ${{ steps.release-branch.outputs.branch }}
+        run: |
+          body_file="$RUNNER_TEMP/release-pr.md"
+          cat > "$body_file" <<EOF
+          Prepares Namastack Once $RELEASE_VERSION.
+
+          This pull request updates the Gradle project version and the shared example dependency catalog.
+
+          Once the release commit is validated, create the annotated tag v$RELEASE_VERSION.
+          Run Publish Existing Tag with version $RELEASE_VERSION in dry-run mode before publishing.
+          EOF
+
+          existing_pr_url="$(
+            gh pr list \
+              --base main \
+              --head "$RELEASE_BRANCH" \
+              --state open \
+              --json url \
+              --jq '.[0].url // empty'
+          )"
+          if [[ -n "$existing_pr_url" ]]; then
+            echo "Reusing existing release pull request $existing_pr_url"
+          else
+            gh pr create \
+              --base main \
+              --head "$RELEASE_BRANCH" \
+              --title "Prepare release $RELEASE_VERSION" \
+              --label release \
+              --body-file "$body_file"
+          fi
+
+      - name: Start release validation workflows
+        env:
+          RELEASE_BRANCH: ${{ steps.release-branch.outputs.branch }}
+        run: |
+          gh workflow run gradle-test.yml --ref "$RELEASE_BRANCH"
+          gh workflow run example-smoke-tests.yml --ref "$RELEASE_BRANCH"

@@ -1,0 +1,15 @@
+{
+  "properties": [
+    {
+      "name": "namastack.once.jdbc.table-name",
+      "type": "java.lang.String",
+      "defaultValue": "once_marker",
+      "description": "Existing marker table for the auto-configured default Once instance. Once never creates or migrates tables."
+    },
+    {
+      "name": "namastack.once.jdbc.schema-name",
+      "type": "java.lang.String",
+      "description": "Optional existing schema for the default Once instance (database/catalog for MySQL or MariaDB)."
+    }
+  ]
+}

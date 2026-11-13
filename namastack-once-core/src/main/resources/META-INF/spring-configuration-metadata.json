@@ -1,0 +1,40 @@
+{
+  "properties": [
+    {
+      "name": "namastack.once.enabled",
+      "type": "java.lang.Boolean",
+      "defaultValue": true,
+      "description": "Enable Once protection. When disabled, annotated methods run without Once protection."
+    },
+    {
+      "name": "namastack.once.transaction-manager",
+      "type": "java.lang.String",
+      "defaultValue": "",
+      "description": "Transaction-manager bean selected once when creating the default Once instance; empty uses an unambiguous Spring candidate."
+    },
+    {
+      "name": "namastack.once.cleanup.enabled",
+      "type": "java.lang.Boolean",
+      "defaultValue": true,
+      "description": "Delete cleanup-eligible markers periodically. Existing markers protect their identities until deletion."
+    },
+    {
+      "name": "namastack.once.cleanup.interval",
+      "type": "java.time.Duration",
+      "defaultValue": "1h",
+      "description": "Positive fixed delay after a complete cleanup pass."
+    },
+    {
+      "name": "namastack.once.cleanup.batch-size",
+      "type": "java.lang.Integer",
+      "defaultValue": 1000,
+      "description": "Maximum marker deletions per committed cleanup batch. A pass repeats until a batch deletes no markers."
+    },
+    {
+      "name": "namastack.once.cleanup.shutdown-timeout",
+      "type": "java.time.Duration",
+      "description": "Maximum wait for an active cleanup batch during graceful shutdown.",
+      "defaultValue": "30s"
+    }
+  ]
+}

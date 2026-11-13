@@ -1,0 +1,15 @@
+spring:
+  main:
+    web-application-type: none
+  datasource:
+    url: jdbc:h2:mem:once-modulith;DB_CLOSE_DELAY=-1
+    username: sa
+    password: ""
+  sql:
+    init:
+      mode: always
+      schema-locations: classpath:db/migration/V1__once.sql,classpath:db/migration/V2__business.sql,classpath:db/migration/V3__modulith.sql
+namastack:
+  once:
+    cleanup:
+      enabled: false

@@ -1,0 +1,26 @@
+version: 2
+updates:
+  - package-ecosystem: "gradle"
+    directory: "/"
+    schedule:
+      interval: "daily"
+  - package-ecosystem: "gradle"
+    directories:
+      - "/namastack-once-examples/namastack-once-example-java"
+      - "/namastack-once-examples/namastack-once-example-kotlin"
+      - "/namastack-once-examples/namastack-once-example-modulith"
+      - "/namastack-once-examples/namastack-once-example-mongodb"
+      - "/namastack-once-examples/namastack-once-example-multiple-instances"
+      - "/namastack-once-examples/namastack-once-example-outbox-tracing"
+      - "/namastack-once-examples/namastack-once-example-postgresql"
+    schedule:
+      interval: "daily"
+    ignore:
+      - dependency-name: "io.namastack:*"
+    groups:
+      example-dependencies:
+        group-by: dependency-name
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
