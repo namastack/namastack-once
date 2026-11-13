@@ -1,0 +1,102 @@
+[versions]
+# Kotlin and Plugin versions
+kotlin = "2.4.21"
+springBoot = "4.1.2"
+springCloudAws = "4.2.1"
+ktlint = "14.2.0"
+dokka = "2.3.0"
+publish = "0.37.0"
+
+# Dependency versions
+mockk = "1.14.12"
+testcontainers = "2.0.5"
+
+[libraries]
+# Spring Boot dependencies
+spring-boot-starter = { module = "org.springframework.boot:spring-boot-starter" }
+spring-boot-starter-jdbc = { module = "org.springframework.boot:spring-boot-starter-jdbc" }
+spring-boot-starter-data-jpa = { module = "org.springframework.boot:spring-boot-starter-data-jpa" }
+spring-boot-starter-data-mongodb = { module = "org.springframework.boot:spring-boot-starter-data-mongodb" }
+spring-aop = { module = "org.springframework:spring-aop" }
+spring-context = { module = "org.springframework:spring-context" }
+spring-expression = { module = "org.springframework:spring-expression" }
+spring-boot-bom = { module = "org.springframework.boot:spring-boot-dependencies", version.ref = "springBoot" }
+spring-boot = { module = "org.springframework.boot:spring-boot" }
+spring-boot-amqp = { module = "org.springframework.boot:spring-boot-amqp" }
+spring-boot-actuator = { module = "org.springframework.boot:spring-boot-actuator" }
+spring-boot-autoconfigure = { module = "org.springframework.boot:spring-boot-autoconfigure" }
+spring-boot-tracing = { module = "org.springframework.boot:spring-boot-micrometer-tracing" }
+spring-boot-jdbc = { module = "org.springframework.boot:spring-boot-jdbc" }
+spring-boot-kafka = { module = "org.springframework.boot:spring-boot-kafka" }
+spring-boot-data-mongodb = { module = "org.springframework.boot:spring-boot-data-mongodb" }
+spring-boot-starter-test = { module = "org.springframework.boot:spring-boot-starter-test" }
+spring-boot-starter-jdbc-test = { module = "org.springframework.boot:spring-boot-starter-jdbc-test" }
+spring-boot-starter-data-mongodb-test = { module = "org.springframework.boot:spring-boot-starter-data-mongodb-test" }
+spring-amqp = { module = "org.springframework.amqp:spring-amqp" }
+spring-core = { module = "org.springframework:spring-core" }
+spring-jdbc = { module = "org.springframework:spring-jdbc" }
+spring-kafka = { module = "org.springframework.kafka:spring-kafka" }
+spring-rabbit = { module = "org.springframework.amqp:spring-rabbit" }
+spring-tx = { module = "org.springframework:spring-tx" }
+
+# Spring Cloud AWS
+spring-cloud-aws-bom = { module = "io.awspring.cloud:spring-cloud-aws-dependencies", version.ref = "springCloudAws" }
+spring-cloud-aws-sns = { module = "io.awspring.cloud:spring-cloud-aws-sns" }
+spring-cloud-aws-autoconfigure = { module = "io.awspring.cloud:spring-cloud-aws-autoconfigure" }
+
+# Kotlin dependencies
+kotlin-reflect = { module = "org.jetbrains.kotlin:kotlin-reflect" }
+
+# Database dependencies
+h2 = { module = "com.h2database:h2" }
+
+# JDBC drivers
+postgresql = { module = "org.postgresql:postgresql" }
+mysql-connector-j = { module = "com.mysql:mysql-connector-j" }
+mariadb-java-client = { module = "org.mariadb.jdbc:mariadb-java-client" }
+mssql-jdbc = { module = "com.microsoft.sqlserver:mssql-jdbc" }
+oracle-jdbc = { module = "com.oracle.database.jdbc:ojdbc11" }
+
+# Test dependencies
+mockk = { module = "io.mockk:mockk", version.ref = "mockk" }
+assertj-core = { module = "org.assertj:assertj-core" }
+junit-jupiter = { module = "org.junit.jupiter:junit-jupiter" }
+junit-platform-launcher = { module = "org.junit.platform:junit-platform-launcher" }
+
+# Metrics dependencies
+micrometer-core = { module = "io.micrometer:micrometer-core" }
+micrometer-observation = { module = "io.micrometer:micrometer-observation" }
+micrometer-registry-prometheus = { module = "io.micrometer:micrometer-registry-prometheus" }
+micrometer-tracing = { module = "io.micrometer:micrometer-tracing" }
+
+# Logging dependencies
+slf4j-api = { module = "org.slf4j:slf4j-api" }
+
+# Common dependencies
+commons-codec = { module = "commons-codec:commons-codec" }
+
+# Jackson dependencies
+jackson-databind = { module = "tools.jackson.core:jackson-databind" }
+jackson-module-kotlin = { module = "tools.jackson.module:jackson-module-kotlin" }
+
+# Testcontainers dependencies
+testcontainers-junit-jupiter = { module = "org.testcontainers:testcontainers-junit-jupiter", version.ref = "testcontainers" }
+testcontainers-postgresql = { module = "org.testcontainers:testcontainers-postgresql", version.ref = "testcontainers" }
+testcontainers-mysql = { module = "org.testcontainers:testcontainers-mysql", version.ref = "testcontainers" }
+testcontainers-mariadb = { module = "org.testcontainers:testcontainers-mariadb", version.ref = "testcontainers" }
+testcontainers-mssqlserver = { module = "org.testcontainers:testcontainers-mssqlserver", version.ref = "testcontainers" }
+testcontainers-oracle-xe = { module = "org.testcontainers:testcontainers-oracle-xe", version.ref = "testcontainers" }
+testcontainers-mongodb = { module = "org.testcontainers:testcontainers-mongodb", version.ref = "testcontainers" }
+
+[plugins]
+# Kotlin plugins
+kotlin-jvm = { id = "org.jetbrains.kotlin.jvm", version.ref = "kotlin" }
+kotlin-spring = { id = "org.jetbrains.kotlin.plugin.spring", version.ref = "kotlin" }
+
+# Spring plugins
+spring-boot = { id = "org.springframework.boot", version.ref = "springBoot" }
+
+# Code quality plugins
+ktlint = { id = "org.jlleitschuh.gradle.ktlint", version.ref = "ktlint" }
+dokka-javadoc = { id = "org.jetbrains.dokka-javadoc", version.ref = "dokka" }
+maven-publish = { id = "com.vanniktech.maven.publish", version.ref = "publish" }

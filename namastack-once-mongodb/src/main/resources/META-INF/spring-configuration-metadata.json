@@ -1,0 +1,10 @@
+{
+  "properties": [
+    {
+      "name": "namastack.once.mongodb.collection-name",
+      "type": "java.lang.String",
+      "defaultValue": "once_marker",
+      "description": "Application-provisioned marker collection for the default MongoDB Once instance."
+    }
+  ]
+}

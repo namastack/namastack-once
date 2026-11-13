@@ -1,0 +1,9 @@
+spring:
+  main:
+    web-application-type: none
+  mongodb:
+    uri: mongodb://localhost:27017/once_example?replicaSet=rs0
+namastack:
+  once:
+    cleanup:
+      enabled: false

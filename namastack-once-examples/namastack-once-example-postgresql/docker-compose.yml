@@ -1,0 +1,14 @@
+services:
+  postgres:
+    image: postgres:18-alpine
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_DB: once
+      POSTGRES_USER: once
+      POSTGRES_PASSWORD: once
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U once -d once"]
+      interval: 2s
+      timeout: 2s
+      retries: 20

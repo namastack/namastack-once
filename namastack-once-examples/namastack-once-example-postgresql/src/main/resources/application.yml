@@ -1,0 +1,15 @@
+spring:
+  main:
+    web-application-type: none
+  datasource:
+    url: jdbc:postgresql://localhost:5432/once
+    username: once
+    password: once
+  sql:
+    init:
+      mode: always
+      schema-locations: classpath:db/migration/V1__once.sql,classpath:db/migration/V2__orders.sql
+namastack:
+  once:
+    cleanup:
+      enabled: false

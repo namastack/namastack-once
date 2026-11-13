@@ -1,0 +1,107 @@
+name: Example smoke tests
+
+on:
+  push:
+    branches:
+      - 'main'
+      - 'release/**'
+  pull_request:
+    branches:
+      - 'main'
+      - 'release/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: example-smoke-tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  publish-snapshot:
+    runs-on: ubuntu-latest
+    name: Publish snapshot to Maven local
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v5
+        with:
+          java-version: '21'
+          distribution: oracle
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v6
+
+      - name: Publish current snapshot to Maven local
+        run: ./gradlew publishToMavenLocal -x test --no-daemon
+
+      - name: Pack Namastack Maven local artifacts
+        run: tar -czf namastack-maven-local.tgz -C ~/.m2/repository io/namastack
+
+      - name: Upload Namastack Maven local artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: namastack-maven-local
+          path: namastack-maven-local.tgz
+          if-no-files-found: error
+          compression-level: 0
+
+  example-smoke-tests:
+    runs-on: ubuntu-latest
+    needs: publish-snapshot
+    name: ${{ matrix.example }}
+    strategy:
+      fail-fast: false
+      matrix:
+        example:
+          - namastack-once-example-java
+          - namastack-once-example-kotlin
+          - namastack-once-example-modulith
+          - namastack-once-example-outbox-tracing
+          - namastack-once-example-mongodb
+          - namastack-once-example-multiple-instances
+          - namastack-once-example-postgresql
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v5
+        with:
+          java-version: '21'
+          distribution: oracle
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v6
+
+      - name: Download Namastack Maven local artifacts
+        uses: actions/download-artifact@v7
+        with:
+          name: namastack-maven-local
+
+      - name: Restore Namastack Maven local artifacts
+        run: |
+          mkdir -p ~/.m2/repository
+          tar -xzf namastack-maven-local.tgz -C ~/.m2/repository
+
+      - name: Checkout Outbox for the combined tracing example
+        if: matrix.example == 'namastack-once-example-outbox-tracing'
+        uses: actions/checkout@v6
+        with:
+          repository: namastack/namastack-outbox
+          path: .example-dependencies/namastack-outbox
+
+      - name: Run example smoke test
+        working-directory: namastack-once-examples/${{ matrix.example }}
+        # Cache compilation, but always execute the smoke test against this run's Maven local snapshot.
+        run: |
+          if [ "${{ matrix.example }}" = "namastack-once-example-outbox-tracing" ]; then
+            ./gradlew test --rerun --build-cache --no-daemon -PoutboxSource="$GITHUB_WORKSPACE/.example-dependencies/namastack-outbox"
+          else
+            ./gradlew test --rerun --build-cache --no-daemon
+          fi

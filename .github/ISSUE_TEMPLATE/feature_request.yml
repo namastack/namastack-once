@@ -1,0 +1,11 @@
+name: Feature request
+description: Propose a focused Once improvement.
+body:
+  - type: textarea
+    attributes:
+      label: Use case and proposed behavior
+    validations:
+      required: true
+  - type: textarea
+    attributes:
+      label: Alternatives and transaction implications

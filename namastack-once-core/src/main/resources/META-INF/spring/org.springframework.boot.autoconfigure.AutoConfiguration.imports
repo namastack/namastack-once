@@ -1,0 +1,4 @@
+io.namastack.once.config.OnceCoreInfrastructureAutoConfiguration
+io.namastack.once.config.OnceCoreAnnotationAutoConfiguration
+io.namastack.once.config.OnceCoreThreadingAutoConfiguration
+io.namastack.once.config.OnceCoreSchedulingAutoConfiguration
