@@ -80,7 +80,7 @@ jobs:
         uses: gradle/actions/setup-gradle@v6
 
       - name: Download Namastack Maven local artifacts
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@v8
         with:
           name: namastack-maven-local
 
