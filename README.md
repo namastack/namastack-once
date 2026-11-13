@@ -53,14 +53,23 @@ Namastack Once handles these concerns as part of your Spring Boot application.
 Once reserves a marker for the operation's scope and key, runs your business operation and commits both together.
 A duplicate skips the operation; a failure rolls back the transaction so a later delivery can try again.
 
-```mermaid
-flowchart TD
-    A[Operation with scope and key] --> B[Begin transaction and reserve marker]
-    B -->|Reserved| C[Run business operation]
-    C -->|Success| D[Commit marker and business data]
-    C -->|Failure| E[Roll back and propagate failure]
-    B -->|Duplicate| F[Roll back reservation and skip operation]
-```
+<div align="center">
+  <picture>
+    <source
+      media="(prefers-color-scheme: dark)"
+      srcset="./.github/assets/idempotency_diagram_dark.svg"
+    >
+    <source
+      media="(prefers-color-scheme: light)"
+      srcset="./.github/assets/idempotency_diagram_light.svg"
+    >
+    <img
+      src="./.github/assets/idempotency_diagram_light.svg"
+      alt="Namastack Once flow: reserve a marker for the scope and key; skip duplicates, commit successful business operations with their marker, or roll back failures."
+      width="600"
+    >
+  </picture>
+</div>
 
 Protected writes must share Once's database resource and transaction manager. Remote calls and other external effects
 are outside that transaction. Once owns the transaction, so invoke it outside an existing transaction.
