@@ -25,7 +25,7 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Set up JDK 21
         uses: actions/setup-java@v5
@@ -68,7 +68,7 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Set up JDK 21
         uses: actions/setup-java@v5
@@ -91,7 +91,7 @@ jobs:
 
       - name: Checkout Outbox for the combined tracing example
         if: matrix.example == 'namastack-once-example-outbox-tracing'
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           repository: namastack/namastack-outbox
           path: .example-dependencies/namastack-outbox
