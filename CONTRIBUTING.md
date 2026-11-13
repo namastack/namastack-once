@@ -104,7 +104,7 @@ before implementation. Small, local, and easily reversible changes do not requir
 this process.
 
 The architectural decision process is described in [GOVERNANCE.md](GOVERNANCE.md).
-Record accepted decisions in the relevant issue or discussion; a separate documentation project is deferred.
+Record accepted decisions in the relevant issue or discussion.
 
 In brief:
 
@@ -262,7 +262,7 @@ Never add automatic schema creation; application migrations own DDL.
 
 - **KDoc**: In-code documentation for APIs
 - **README.md**: Project overview and quick start
-- A separate documentation site is deferred from the initial release.
+- **User documentation**: Maintained in a separate repository
 - **Example READMEs**: In each example project
 
 ## Issue Reporting

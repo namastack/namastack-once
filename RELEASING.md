@@ -7,7 +7,8 @@ builds add `-SNAPSHOT`, while `-Prelease=true` selects immutable release coordin
 
 For later releases, run **Prepare Release** with a version without the `v` prefix, such as `0.1.1`.
 It tests release tooling, updates the root version and shared example catalog, and opens a
-`release/<version>` pull request. No documentation-site/performance-test versioning is involved.
+`release/<version>` pull request. Coordinate user documentation updates in the separate documentation
+repository as part of each release.
 Review and merge after Gradle and example smoke-test workflows pass. The initial 0.1.0 version is
 already set, so its first publication does not require a version-only preparation pull request.
 
@@ -35,7 +36,18 @@ Configure the same signing and Central credentials as Outbox:
 - `CODECOV_TOKEN` for coverage uploads
 
 Allow Actions to create release pull requests, and create the `release` label used by the workflow.
-The five published coordinates are `io.namastack:namastack-once-{api,core,jdbc,starter-jdbc,bom}`.
+The nine published artifacts use the group `io.namastack`:
+
+- `namastack-once-api`
+- `namastack-once-core`
+- `namastack-once-jdbc`
+- `namastack-once-mongodb`
+- `namastack-once-starter-jdbc`
+- `namastack-once-starter-mongodb`
+- `namastack-once-observability-api`
+- `namastack-once-observability`
+- `namastack-once-bom`
+
 The integration-tests module and standalone example applications are not release artifacts.
 
 Local checks:

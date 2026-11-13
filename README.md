@@ -6,8 +6,7 @@
 
 <div align="center">
   <p>
-    <a href="docs/reference.md">Documentation</a> ·
-    <a href="docs/reference.md#dependency">Getting Started</a> ·
+    <a href="namastack-once-examples/README.md">Examples</a> ·
     <a href="https://github.com/namastack/namastack-once/releases">Releases</a> ·
     <a href="https://github.com/namastack/namastack-once/discussions">Community</a>
   </p>
@@ -27,7 +26,7 @@ business operations with Java and Kotlin.
 It commits a duplicate-detection marker atomically with your business data and skips repeated operations sharing the
 same scope and key, with built-in support for retention, cleanup and observability — using your existing database.
 
-**[Explore the documentation →](docs/reference.md)**
+**[Explore the examples →](namastack-once-examples/README.md)**
 
 ## Why Namastack Once?
 
@@ -78,19 +77,18 @@ are outside that transaction. Once owns the transaction, so invoke it outside an
 
 ## Documentation
 
-Everything you need to get started, configure and operate Namastack Once is available in the repository documentation.
+User documentation is maintained in a separate repository. This repository contains runnable examples
+and guidance for contributors.
 
-* **[Getting Started →](docs/reference.md#dependency)** — add a starter and apply the database schema
-* **[Reference →](docs/reference.md)** — APIs, transactions, retention, persistence and observability
 * **[Examples →](namastack-once-examples/README.md)** — Java, Kotlin, PostgreSQL, MongoDB, Modulith and tracing
-* **[Build and Test →](docs/reference.md#build-and-test)** — local development and database verification
+* **[Build and Test →](CONTRIBUTING.md#building-the-project)** — local development and database verification
 
 ---
 
 ## Releases and Compatibility
 
-Namastack Once is in initial development toward **0.1.0**. Development builds use **0.1.0-SNAPSHOT**; this repository
-is an initial implementation, not a published release.
+Published versions and release notes are available on the
+**[Releases page](https://github.com/namastack/namastack-once/releases)**. Development builds use the `-SNAPSHOT` version suffix.
 
 The project targets Java 17 or later and Spring Boot 4.1. Review the
 **[Release Guide](RELEASING.md)** for versioning and release procedures, and the
