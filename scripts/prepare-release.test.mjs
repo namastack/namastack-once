@@ -23,6 +23,13 @@ test('prepares project and example versions together', () => fixture(root => {
   assert.match(readFileSync(join(root, 'namastack-once-examples/gradle/libs.versions.toml'), 'utf8'), /namastackOnce = "0.2.0-RC1-SNAPSHOT"/);
 }));
 
+test('an already prepared first release leaves both version files unchanged', () => fixture(root => {
+  const paths = ['build.gradle.kts', 'namastack-once-examples/gradle/libs.versions.toml'];
+  const before = paths.map(path => readFileSync(join(root, path), 'utf8'));
+  prepareRelease('0.1.0', root);
+  assert.deepEqual(paths.map(path => readFileSync(join(root, path), 'utf8')), before);
+}));
+
 test('rejects lower and invalid versions without changing files', () => fixture(root => {
   const file = join(root, 'build.gradle.kts');
   const before = readFileSync(file, 'utf8');
