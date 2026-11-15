@@ -4,6 +4,8 @@ import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Tag
 import org.junit.jupiter.api.Test
 import org.springframework.jdbc.core.JdbcTemplate
+import org.springframework.jdbc.core.queryForList
+import org.springframework.jdbc.core.queryForObject
 import org.springframework.jdbc.datasource.DriverManagerDataSource
 import org.springframework.jdbc.support.JdbcTransactionManager
 import org.testcontainers.junit.jupiter.Container
@@ -48,9 +50,9 @@ class PostgresOnceIntegrationTest : AbstractOnceIntegrationTest() {
                     clock,
                 )
             val identity = IdempotencyRequest.of("search-path", "one")
-            assertThat(pathOnce.execute(identity) { IdempotencyResult.executed() }.wasExecuted()).isTrue()
-            assertThat(pathOnce.execute<Void?>(identity) { error("duplicate must skip") }.wasExecuted()).isFalse()
-            assertThat(JdbcTemplate(pathDataSource).queryForObject("SELECT COUNT(*) FROM path_marker", Int::class.java))
+            assertThat(pathOnce.executeWithoutResult(identity) { }.wasExecuted()).isTrue()
+            assertThat(pathOnce.executeWithoutResult(identity) { error("duplicate must skip") }.wasExecuted()).isFalse()
+            assertThat(JdbcTemplate(pathDataSource).queryForObject<Int>("SELECT COUNT(*) FROM path_marker"))
                 .isEqualTo(1)
 
             jdbc.execute("CREATE TABLE $firstSchema.path_marker (LIKE public.once_marker INCLUDING ALL)")
@@ -64,9 +66,13 @@ class PostgresOnceIntegrationTest : AbstractOnceIntegrationTest() {
                     clock,
                 )
             assertThat(
-                explicitOnce.execute<Void?>(identity) { error("explicit schema must find the marker") }.wasExecuted(),
+                explicitOnce
+                    .executeWithoutResult(
+                        identity,
+                    ) { error("explicit schema must find the marker") }
+                    .wasExecuted(),
             ).isFalse()
-            assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM $firstSchema.path_marker", Int::class.java)).isZero()
+            assertThat(jdbc.queryForObject<Int>("SELECT COUNT(*) FROM $firstSchema.path_marker")).isZero()
         } finally {
             jdbc.execute("DROP SCHEMA $firstSchema CASCADE")
             jdbc.execute("DROP SCHEMA $markerSchema CASCADE")
@@ -106,7 +112,7 @@ class PostgresOnceIntegrationTest : AbstractOnceIntegrationTest() {
             val cutoff = Instant.parse("2026-01-01T00:00:00Z")
 
             assertThat(repository.cleanup(cutoff, 1)).isEqualTo(1)
-            assertThat(jdbc.queryForList("SELECT idempotency_hash FROM partitioned_marker", String::class.java))
+            assertThat(jdbc.queryForList<String>("SELECT idempotency_hash FROM partitioned_marker"))
                 .containsExactlyInAnyOrder("e".repeat(64), "f".repeat(64))
             assertThat(repository.cleanup(cutoff, 1)).isZero()
         } finally {

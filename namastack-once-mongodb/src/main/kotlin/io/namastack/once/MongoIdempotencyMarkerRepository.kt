@@ -6,6 +6,7 @@ import org.springframework.dao.DuplicateKeyException
 import org.springframework.data.domain.Sort
 import org.springframework.data.mongodb.MongoTransactionManager
 import org.springframework.data.mongodb.core.MongoTemplate
+import org.springframework.data.mongodb.core.find
 import org.springframework.data.mongodb.core.query.Criteria
 import org.springframework.data.mongodb.core.query.Query
 import org.springframework.transaction.TransactionDefinition.PROPAGATION_REQUIRES_NEW
@@ -117,11 +118,8 @@ class MongoIdempotencyMarkerRepository
             candidates.fields().include("_id")
             val identities =
                 mongoTemplate
-                    .find(
-                        candidates,
-                        Document::class.java,
-                        collectionName,
-                    ).map { it.getString("_id") }
+                    .find<Document>(candidates, collectionName)
+                    .map { it.getString("_id") }
             if (identities.isEmpty()) return 0
 
             val deletion =

@@ -8,6 +8,7 @@ import io.namastack.once.config.OnceCoreInfrastructureAutoConfiguration
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.NoUniqueBeanDefinitionException
+import org.springframework.beans.factory.getBean
 import org.springframework.boot.autoconfigure.AutoConfigurations
 import org.springframework.boot.test.context.runner.ApplicationContextRunner
 import org.springframework.data.mongodb.MongoDatabaseFactory
@@ -42,7 +43,7 @@ class MongoOnceAutoConfigurationTest {
         runner.withBean(MongoTemplate::class.java, Supplier { template }).run { context ->
             assertThat(context).hasNotFailed()
             assertThat(context).hasSingleBean(DefaultIdempotencyOperations::class.java)
-            assertThat(context.getBean(MongoTransactionManager::class.java).databaseFactory).isSameAs(factory)
+            assertThat(context.getBean<MongoTransactionManager>().databaseFactory).isSameAs(factory)
         }
     }
 
@@ -54,8 +55,8 @@ class MongoOnceAutoConfigurationTest {
             .withBean(MongoTemplate::class.java, Supplier { template })
             .run { context ->
                 assertThat(context).hasNotFailed()
-                assertThat(context.getBean(MongoTransactionManager::class.java).databaseFactory).isSameAs(factory)
-                assertThat(context.getBean(IdempotencyMarkerRepository::class.java).transactionResourceKey)
+                assertThat(context.getBean<MongoTransactionManager>().databaseFactory).isSameAs(factory)
+                assertThat(context.getBean<IdempotencyMarkerRepository>().transactionResourceKey)
                     .isSameAs(factory)
             }
     }
@@ -68,7 +69,7 @@ class MongoOnceAutoConfigurationTest {
             assertThat(context).hasSingleBean(MongoIdempotencyMarkerRepository::class.java)
             assertThat(context).hasSingleBean(MongoTransactionManager::class.java)
             assertThat(
-                context.getBean(IdempotencyMarkerRepository::class.java).transactionResourceKey,
+                context.getBean<IdempotencyMarkerRepository>().transactionResourceKey,
             ).isSameAs(factory)
             verify(exactly = 0) { factory.getSession(any()) }
         }
@@ -88,7 +89,7 @@ class MongoOnceAutoConfigurationTest {
         val custom = mockk<IdempotencyOperations>()
         configured().withBean(IdempotencyOperations::class.java, Supplier { custom }).run { context ->
             assertThat(context).hasNotFailed()
-            assertThat(context.getBean(IdempotencyOperations::class.java)).isSameAs(custom)
+            assertThat(context.getBean<IdempotencyOperations>()).isSameAs(custom)
             assertThat(context).doesNotHaveBean(MongoTransactionManager::class.java)
         }
     }
@@ -98,7 +99,7 @@ class MongoOnceAutoConfigurationTest {
         val custom = mockk<IdempotencyMarkerRepository>()
         configured().withBean(IdempotencyMarkerRepository::class.java, Supplier { custom }).run { context ->
             assertThat(context).hasNotFailed()
-            assertThat(context.getBean(IdempotencyMarkerRepository::class.java)).isSameAs(custom)
+            assertThat(context.getBean<IdempotencyMarkerRepository>()).isSameAs(custom)
             assertThat(context).hasSingleBean(DefaultIdempotencyOperations::class.java)
         }
     }
@@ -131,7 +132,7 @@ class MongoOnceAutoConfigurationTest {
         val clock = Clock.fixed(java.time.Instant.EPOCH, java.time.ZoneOffset.UTC)
         configured().withBean(Clock::class.java, Supplier { clock }).run { context ->
             assertThat(context).hasNotFailed()
-            assertThat(context.getBean(Clock::class.java)).isSameAs(clock)
+            assertThat(context.getBean<Clock>()).isSameAs(clock)
         }
     }
 

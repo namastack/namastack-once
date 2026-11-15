@@ -8,6 +8,7 @@ import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test
 import org.springframework.core.convert.support.DefaultConversionService
 import org.springframework.dao.DataAccessException
+import org.springframework.jdbc.core.queryForObject
 import org.springframework.transaction.PlatformTransactionManager
 import org.springframework.transaction.TransactionDefinition
 import org.springframework.transaction.TransactionStatus
@@ -17,7 +18,6 @@ import org.springframework.transaction.support.TransactionSynchronization
 import org.springframework.transaction.support.TransactionSynchronizationManager
 import org.springframework.transaction.support.TransactionTemplate
 import java.time.Duration
-import java.util.function.Supplier
 
 /** Shared execution and transaction checks, inherited by every supported database test. */
 interface OnceExecutionContract : OnceDatabaseTestSupport {
@@ -27,21 +27,21 @@ interface OnceExecutionContract : OnceDatabaseTestSupport {
         val first =
             once.execute<String>(request) {
                 effect("one")
-                IdempotencyResult.executed("new")
+                "new"
             }
-        val duplicate = once.execute<Void?>(request) { error("Duplicate body must not run") }
+        val duplicate = once.executeWithoutResult(request) { error("Duplicate body must not run") }
         assertThat(first.fold({ it }, { "duplicate" })).isEqualTo("new")
         assertThat(duplicate.wasExecuted()).isFalse()
         assertThat(effects()).isEqualTo(1)
         assertThat(markers()).isEqualTo(1)
-        assertThat(jdbc.queryForObject("SELECT idempotency_hash FROM once_marker", String::class.java))
+        assertThat(jdbc.queryForObject<String>("SELECT idempotency_hash FROM once_marker"))
             .matches("[0-9a-f]{64}")
     }
 
     @Test
     fun `action failure rolls back all writes and allows a later execution`() {
         assertThatIllegalStateException().isThrownBy {
-            once.execute<Void?>(request("failed")) {
+            once.executeWithoutResult(request("failed")) {
                 effect("failed")
                 error("business failure")
             }
@@ -50,9 +50,8 @@ interface OnceExecutionContract : OnceDatabaseTestSupport {
         assertThat(markers()).isZero()
         assertThat(
             once
-                .execute<Void?>(request("failed")) {
+                .executeWithoutResult(request("failed")) {
                     effect("failed")
-                    IdempotencyResult.executed()
                 }.wasExecuted(),
         ).isTrue()
     }
@@ -61,16 +60,15 @@ interface OnceExecutionContract : OnceDatabaseTestSupport {
     fun `five failures leave no marker and a sixth attempt can commit`() {
         repeat(5) {
             assertThatIllegalStateException().isThrownBy {
-                once.execute<Void?>(request("retry")) {
+                once.executeWithoutResult(request("retry")) {
                     effect("retry")
                     error("failure")
                 }
             }
         }
         assertThat(markers()).isZero()
-        once.execute<Void?>(request("retry")) {
+        once.executeWithoutResult(request("retry")) {
             effect("retry")
-            IdempotencyResult.executed()
         }
         assertThat(effects()).isEqualTo(1)
         assertThat(markers()).isEqualTo(1)
@@ -78,12 +76,12 @@ interface OnceExecutionContract : OnceDatabaseTestSupport {
 
     @Test
     fun `existing transactions are rejected before work without poisoning the caller transaction`() {
-        once.execute(request("duplicate")) { IdempotencyResult.executed() }
+        once.executeWithoutResult(request("duplicate")) { }
         TransactionTemplate(manager).executeWithoutResult {
             listOf("new", "duplicate").forEach { key ->
                 assertThatIllegalStateException()
                     .isThrownBy {
-                        once.execute<Void?>(request(key)) { error("must not run") }
+                        once.executeWithoutResult(request(key)) { error("must not run") }
                     }.withMessageContaining("Once must own its transaction")
             }
             effect("caller-only")
@@ -99,9 +97,8 @@ interface OnceExecutionContract : OnceDatabaseTestSupport {
             TransactionTemplate(manager)
                 .apply { propagationBehavior = TransactionDefinition.PROPAGATION_NOT_SUPPORTED }
                 .executeWithoutResult {
-                    once.execute(request("independent")) {
+                    once.executeWithoutResult(request("independent")) {
                         effect("independent")
-                        IdempotencyResult.executed()
                     }
                 }
             outer.setRollbackOnly()
@@ -112,12 +109,11 @@ interface OnceExecutionContract : OnceDatabaseTestSupport {
 
     @Test
     fun `business services can join the transaction owned by Once`() {
-        once.execute(request("services")) {
+        once.executeWithoutResult(request("services")) {
             TransactionTemplate(manager).executeWithoutResult { participant ->
                 assertThat(participant.isNewTransaction).isFalse()
                 effect("service")
             }
-            IdempotencyResult.executed()
         }
         assertThat(markers()).isEqualTo(1)
         assertThat(effects()).isEqualTo(1)
@@ -126,12 +122,11 @@ interface OnceExecutionContract : OnceDatabaseTestSupport {
     @Test
     fun `a business service marking rollback-only cannot produce an executed outcome`() {
         assertThatThrownBy {
-            once.execute(request("rollback-only-service")) {
+            once.executeWithoutResult(request("rollback-only-service")) {
                 TransactionTemplate(manager).executeWithoutResult { participant ->
                     effect("service")
                     participant.setRollbackOnly()
                 }
-                IdempotencyResult.executed()
             }
         }.isInstanceOf(UnexpectedRollbackException::class.java)
         assertThat(markers()).isZero()
@@ -141,12 +136,11 @@ interface OnceExecutionContract : OnceDatabaseTestSupport {
     @Test
     fun `retained identities are skipped across separate transactions`() {
         val finite = request("same").withRetentionPolicy(DurationIdempotencyRetentionPolicy(Duration.ofSeconds(1)))
-        once.execute(finite) {
+        once.executeWithoutResult(finite) {
             effect("same")
-            IdempotencyResult.executed()
         }
         clock.advance(Duration.ofSeconds(2))
-        assertThat(once.execute<Void?>(finite) { error("must skip retained marker") }.wasExecuted()).isFalse()
+        assertThat(once.executeWithoutResult(finite) { error("must skip retained marker") }.wasExecuted()).isFalse()
         assertThat(effects()).isEqualTo(1)
     }
 
@@ -163,16 +157,16 @@ interface OnceExecutionContract : OnceDatabaseTestSupport {
             listOf("outer", "different").forEach { key ->
                 assertThatIllegalStateException()
                     .isThrownBy {
-                        once.execute<Void?>(request("outer")) {
+                        once.executeWithoutResult(request("outer")) {
                             effect("unfinished")
-                            nestedOnce.execute<Void?>(request(key)) { error("nested action must not run") }
+                            nestedOnce.executeWithoutResult(request(key)) { error("nested action must not run") }
                         }
                     }.withMessageContaining("Once must own its transaction")
                 assertThat(markers()).isZero()
                 assertThat(effects()).isZero()
             }
         }
-        assertThat(once.execute(request("outer")) { IdempotencyResult.executed() }.wasExecuted()).isTrue()
+        assertThat(once.executeWithoutResult(request("outer")) { }.wasExecuted()).isTrue()
     }
 
     @Test
@@ -185,7 +179,7 @@ interface OnceExecutionContract : OnceDatabaseTestSupport {
                     object : TransactionSynchronization {
                         private fun attempt() {
                             try {
-                                once.execute<Void?>(request("late")) {
+                                once.executeWithoutResult(request("late")) {
                                     calls++
                                     effect("late")
                                     error("a failed action must never become durable")
@@ -218,13 +212,13 @@ interface OnceExecutionContract : OnceDatabaseTestSupport {
     fun `read-only and rollback-only transactions reject execution`() {
         assertThatIllegalStateException().isThrownBy {
             TransactionTemplate(manager).apply { isReadOnly = true }.executeWithoutResult {
-                once.execute<Void?>(request("readonly")) { error("must not run") }
+                once.executeWithoutResult(request("readonly")) { error("must not run") }
             }
         }
         TransactionTemplate(manager).executeWithoutResult { status ->
             status.setRollbackOnly()
             assertThatIllegalStateException().isThrownBy {
-                once.execute<Void?>(
+                once.executeWithoutResult(
                     request("rollback-only"),
                 ) { error("must not run") }
             }
@@ -233,37 +227,44 @@ interface OnceExecutionContract : OnceDatabaseTestSupport {
     }
 
     @Test
-    fun `null wrapper and application supplied duplicate roll back whereas a null value is valid`() {
-        @Suppress("UNCHECKED_CAST")
-        val nullAction =
-            Supplier<IdempotencyResult<String>?> {
-                effect("null")
+    fun `null business values commit and remain distinct from duplicates`() {
+        val identity = request("null-value")
+        val result =
+            once.execute<String?>(identity) {
+                effect("null-value")
                 null
-            } as Supplier<IdempotencyResult<String>>
-        assertThatIllegalStateException().isThrownBy { once.execute<String>(request("null"), nullAction) }
-        assertThatIllegalStateException().isThrownBy {
-            once.execute<String>(request("fake")) {
-                effect("fake")
-                Duplicate<String>(IdempotencyDuplicateContext("op", "fake", "hash"))
             }
-        }
-        assertThat(markers()).isZero()
-        assertThat(effects()).isZero()
-        assertThat(
-            once
-                .execute<String?>(request("null-value")) {
-                    IdempotencyResult.executed<String?>(null)
-                }.wasExecuted(),
-        ).isTrue()
+        assertThat(result).isEqualTo(IdempotencyResult.Executed<String?>(null))
+        assertThat(once.execute<String?>(identity) { error("must skip") }).isInstanceOf(Duplicate::class.java)
+        assertThat(markers()).isEqualTo(1)
+        assertThat(effects()).isEqualTo(1)
+    }
+
+    @Test
+    fun `result objects returned as business values are wrapped without special treatment`() {
+        val value = Duplicate<String>(IdempotencyDuplicateContext("op", "value", "hash"))
+        val result = once.execute(request("result-value")) { value }
+        assertThat(result).isEqualTo(IdempotencyResult.Executed(value))
+        assertThat(markers()).isEqualTo(1)
+    }
+
+    @Test
+    fun `no-value actions commit once and expose duplicate context`() {
+        val identity = request("no-value")
+        val first = once.executeWithoutResult(identity) { effect("no-value") }
+        val duplicate = once.executeWithoutResult(identity) { error("must skip") }
+        assertThat(first).isEqualTo(IdempotencyResult.Executed<Void?>(null))
+        assertThat(duplicate.fold({ "executed" }, { it.scope })).isEqualTo(identity.scope)
+        assertThat(markers()).isEqualTo(1)
+        assertThat(effects()).isEqualTo(1)
     }
 
     @Test
     fun `unrelated business constraint violations remain technical failures`() {
         effect("exists")
         assertThatThrownBy {
-            once.execute<Void?>(request("constraint")) {
+            once.executeWithoutResult(request("constraint")) {
                 effect("exists")
-                IdempotencyResult.executed()
             }
         }.isInstanceOf(DataAccessException::class.java)
         assertThat(markers()).isZero()
@@ -290,15 +291,14 @@ interface OnceExecutionContract : OnceDatabaseTestSupport {
                 clock = clock,
             )
         assertThatThrownBy {
-            uncertainOnce.execute(request("uncertain")) {
+            uncertainOnce.executeWithoutResult(request("uncertain")) {
                 effect("uncertain")
-                IdempotencyResult.executed()
             }
         }.isInstanceOf(TransactionSystemException::class.java)
         assertThat(markers()).isEqualTo(1)
         assertThat(effects()).isEqualTo(1)
         assertThat(
-            once.execute<Void?>(request("uncertain")) { error("must not repeat a durable effect") }.wasExecuted(),
+            once.executeWithoutResult(request("uncertain")) { error("must not repeat a durable effect") }.wasExecuted(),
         ).isFalse()
     }
 }

@@ -2,13 +2,13 @@ package io.namastack.demo
 
 import io.namastack.once.IdempotencyOperations
 import io.namastack.once.IdempotencyRequest
-import io.namastack.once.IdempotencyResult
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.beans.factory.annotation.Qualifier
 import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.jdbc.core.JdbcTemplate
+import org.springframework.jdbc.core.queryForObject
 import java.util.UUID
 
 @SpringBootTest
@@ -32,16 +32,16 @@ class ExampleSmokeTest {
             handlers.order(eventId)
             handlers.billing(eventId)
         }
-        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM demo_effect WHERE event_id = ?", Int::class.java, eventId))
+        assertThat(jdbc.queryForObject<Int>("SELECT COUNT(*) FROM demo_effect WHERE event_id = ?", eventId))
             .isEqualTo(2)
     }
 
     @Test
     fun `programmatic selection uses injected instances with the same immutable request`() {
         val request = IdempotencyRequest.of("programmatic", UUID.randomUUID())
-        assertThat(ordersOnce.execute(request) { IdempotencyResult.executed() }.wasExecuted()).isTrue()
-        assertThat(billingOnce.execute(request) { IdempotencyResult.executed() }.wasExecuted()).isTrue()
-        assertThat(ordersOnce.execute(request) { IdempotencyResult.executed() }.wasExecuted()).isFalse()
-        assertThat(billingOnce.execute(request) { IdempotencyResult.executed() }.wasExecuted()).isFalse()
+        assertThat(ordersOnce.executeWithoutResult(request) { }.wasExecuted()).isTrue()
+        assertThat(billingOnce.executeWithoutResult(request) { }.wasExecuted()).isTrue()
+        assertThat(ordersOnce.executeWithoutResult(request) { }.wasExecuted()).isFalse()
+        assertThat(billingOnce.executeWithoutResult(request) { }.wasExecuted()).isFalse()
     }
 }

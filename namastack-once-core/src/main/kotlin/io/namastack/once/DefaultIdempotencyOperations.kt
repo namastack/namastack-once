@@ -51,14 +51,14 @@ class DefaultIdempotencyOperations
          *
          * @param T Type of the newly computed business value.
          * @param request Identity and retention policy.
-         * @param action Synchronous application work returning a non-null [Executed] result.
-         * @return The action's result, or [Duplicate] without invoking the action.
+         * @param action Synchronous application work returning a business value, which may be null.
+         * @return The business value wrapped in [Executed], or [Duplicate] without invoking the action.
          * @throws IllegalArgumentException if key conversion or marker retention is invalid.
-         * @throws IllegalStateException if a transaction is already active, ownership checks fail, or the action result is invalid.
+         * @throws IllegalStateException if a transaction is already active or ownership checks fail.
          */
         override fun <T> execute(
             request: IdempotencyRequest,
-            action: Supplier<IdempotencyResult<T>>,
+            action: Supplier<T>,
         ): IdempotencyResult<T> =
             instrumentation.execute(request.scope) {
                 check(!TransactionSynchronizationManager.isActualTransactionActive()) {
@@ -74,7 +74,7 @@ class DefaultIdempotencyOperations
         private fun <T> executeInTransaction(
             request: IdempotencyRequest,
             keyHash: String,
-            action: Supplier<IdempotencyResult<T>>,
+            action: Supplier<T>,
         ): IdempotencyResult<T> {
             try {
                 return transactionTemplate.execute { status ->
@@ -90,7 +90,7 @@ class DefaultIdempotencyOperations
             request: IdempotencyRequest,
             keyHash: String,
             status: TransactionStatus,
-            action: Supplier<IdempotencyResult<T>>,
+            action: Supplier<T>,
         ): IdempotencyResult<T> {
             try {
                 val marker = createMarker(request, keyHash)
@@ -101,20 +101,21 @@ class DefaultIdempotencyOperations
                     return Duplicate(context)
                 }
 
-                return executeAction(action)
+                return Executed(action.get())
             } catch (failure: Throwable) {
                 if (failure is RuntimeException || failure is Error) throw failure
                 throw IdempotencyActionFailure(failure)
             }
         }
 
-        private fun <T> executeAction(action: Supplier<IdempotencyResult<T>>): Executed<T> {
-            // Java suppliers can return null despite their declared result type.
-            val result: IdempotencyResult<T>? = action.get()
-            check(result is Executed<T>) { "Idempotency actions must return a non-null Executed result" }
-
-            return result
-        }
+        override fun executeWithoutResult(
+            request: IdempotencyRequest,
+            action: Runnable,
+        ): IdempotencyResult<Void?> =
+            execute(request) {
+                action.run()
+                null
+            }
 
         private fun createMarker(
             request: IdempotencyRequest,

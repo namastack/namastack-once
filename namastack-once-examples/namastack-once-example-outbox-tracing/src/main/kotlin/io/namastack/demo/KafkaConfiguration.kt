@@ -9,15 +9,12 @@ import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
 import org.springframework.kafka.config.TopicBuilder
 
-/** Provisions the single-partition topic used by the producer and consumer in this demo. */
 @Configuration(proxyBeanMethods = false)
 class KafkaConfiguration {
     companion object {
-        /** Topic transporting stable order event identities. */
         const val ORDERS_TOPIC: String = "order-placed"
     }
 
-    /** Creates the local demo topic with one partition and one replica. @return Topic definition. */
     @Bean
     fun ordersTopic(): NewTopic =
         TopicBuilder
@@ -26,11 +23,6 @@ class KafkaConfiguration {
             .replicas(1)
             .build()
 
-    /**
-     * Routes order events through the built-in Kafka handler with a stable business idempotency key.
-     * An explicit header overrides the default Outbox record ID, retaining identity across republication.
-     * @return Routing for order events, mapping the Kafka value to the plain event identity.
-     */
     @Bean
     fun kafkaOutboxRouting(): KafkaOutboxRouting =
         kafkaOutboxRouting {

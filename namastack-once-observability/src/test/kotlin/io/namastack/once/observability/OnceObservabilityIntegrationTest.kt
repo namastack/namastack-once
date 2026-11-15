@@ -17,6 +17,7 @@ import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test
 import org.springframework.jdbc.core.JdbcTemplate
+import org.springframework.jdbc.core.queryForObject
 import org.springframework.jdbc.datasource.DriverManagerDataSource
 import org.springframework.jdbc.support.JdbcTransactionManager
 import org.springframework.transaction.support.DefaultTransactionStatus
@@ -79,9 +80,8 @@ class OnceObservabilityIntegrationTest {
     @Test
     fun `execution preserves parent scope and duplicate is not an error`() {
         val request = IdempotencyRequest.of("orders.create", "secret-key")
-        val expected = IdempotencyResult.executed("order")
         Observation.createNotStarted("http.request", registry).observe {
-            assertThat(once.execute(request) { expected }).isSameAs(expected)
+            assertThat(once.execute(request) { "order" }).isEqualTo(IdempotencyResult.Executed("order"))
             assertThat(once.execute<String>(request) { error("must skip") }.wasExecuted()).isFalse()
         }
         val executions = contexts.filterIsInstance<OnceExecuteObservationContext>()
@@ -115,7 +115,7 @@ class OnceObservabilityIntegrationTest {
     fun `checked application failures are restored and rollback before observation completes`() {
         val failure = IOException("business failure")
         assertThatThrownBy {
-            once.execute<Void?>(IdempotencyRequest.of("orders", "failure")) {
+            once.executeWithoutResult(IdempotencyRequest.of("orders", "failure")) {
                 jdbc.update("INSERT INTO effects VALUES (1)")
                 throw failure
             }
@@ -123,8 +123,8 @@ class OnceObservabilityIntegrationTest {
         val context = contexts.single() as OnceExecuteObservationContext
         assertThat(context.outcome).isEqualTo("error")
         assertThat(context.error).isSameAs(failure)
-        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM effects", Int::class.java)).isZero()
-        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM once_marker", Int::class.java)).isZero()
+        assertThat(jdbc.queryForObject<Int>("SELECT COUNT(*) FROM effects")).isZero()
+        assertThat(jdbc.queryForObject<Int>("SELECT COUNT(*) FROM once_marker")).isZero()
         assertThat(registry.currentObservation).isNull()
     }
 
@@ -136,9 +136,9 @@ class OnceObservabilityIntegrationTest {
                     "orders",
                     "commit",
                 ).withRetentionPolicy(DurationIdempotencyRetentionPolicy(Duration.ofSeconds(1)))
-        once.execute(request) { IdempotencyResult.executed() }
+        once.executeWithoutResult(request) { }
         failCommit = true
-        assertThatThrownBy { once.execute(IdempotencyRequest.of("orders", "other")) { IdempotencyResult.executed() } }
+        assertThatThrownBy { once.executeWithoutResult(IdempotencyRequest.of("orders", "other")) { } }
             .hasMessage("commit failed")
         assertThatThrownBy { repository.cleanup(Instant.now().plusSeconds(10), 5) }.hasMessage("commit failed")
         assertThat(
@@ -149,7 +149,7 @@ class OnceObservabilityIntegrationTest {
         val cleanup = contexts.filterIsInstance<OnceCleanupObservationContext>().single()
         assertThat(cleanup.outcome).isEqualTo("error")
         assertThat(cleanup.deletedCount).isZero()
-        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM once_marker", Int::class.java)).isEqualTo(1)
+        assertThat(jdbc.queryForObject<Int>("SELECT COUNT(*) FROM once_marker")).isEqualTo(1)
     }
 
     @Test
@@ -161,7 +161,7 @@ class OnceObservabilityIntegrationTest {
                         "orders",
                         it,
                     ).withRetentionPolicy(DurationIdempotencyRetentionPolicy(Duration.ofSeconds(1)))
-            once.execute(request) { IdempotencyResult.executed() }
+            once.executeWithoutResult(request) { }
         }
         val cutoff = Instant.now().plusSeconds(10)
         assertThat(repository.cleanup(cutoff, 2)).isEqualTo(2)
@@ -175,7 +175,7 @@ class OnceObservabilityIntegrationTest {
 
     @Test
     fun `validation failures are observed without running application work`() {
-        assertThatThrownBy { once.execute<Void?>(IdempotencyRequest.of("orders", " ")) { error("must not run") } }
+        assertThatThrownBy { once.executeWithoutResult(IdempotencyRequest.of("orders", " ")) { error("must not run") } }
             .isInstanceOf(IllegalArgumentException::class.java)
         assertThat((contexts.single() as OnceExecuteObservationContext).outcome).isEqualTo("error")
     }

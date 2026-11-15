@@ -14,6 +14,7 @@ import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
 import org.springframework.core.io.ClassPathResource
 import org.springframework.jdbc.core.JdbcTemplate
+import org.springframework.jdbc.core.queryForObject
 import org.springframework.jdbc.datasource.DriverManagerDataSource
 import org.springframework.jdbc.datasource.init.ResourceDatabasePopulator
 import org.springframework.jdbc.support.JdbcTransactionManager
@@ -38,7 +39,7 @@ fun onceTestApplicationContext(): ApplicationContextRunner =
 fun countOnceRows(
     jdbc: JdbcTemplate,
     table: String,
-): Int = checkNotNull(jdbc.queryForObject("SELECT COUNT(*) FROM $table", Int::class.java))
+): Int = checkNotNull(jdbc.queryForObject<Int>("SELECT COUNT(*) FROM $table"))
 
 /** Application-owned test schema, deliberately created outside Once auto-configuration. */
 @Configuration(proxyBeanMethods = false)

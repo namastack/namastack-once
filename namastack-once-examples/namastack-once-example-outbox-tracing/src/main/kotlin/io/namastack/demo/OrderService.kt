@@ -12,22 +12,15 @@ import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.PathVariable
 import org.springframework.web.bind.annotation.RestController
 
-/** Stable event identity survives transport redelivery. @property eventId Original request identity. */
 data class OrderPlaced(
     val eventId: String,
 )
 
-/** Atomically reserves the request, writes the order, and schedules its event. */
 @Service
 class OrderService(
     private val jdbc: JdbcTemplate,
     private val outbox: Outbox,
 ) {
-    /**
-     * Places an order once, with all three writes on the shared JDBC transaction.
-     * @param requestId Stable caller-provided request identity.
-     * @return Newly created identity or a duplicate outcome after transaction completion.
-     */
     @Idempotent(scope = "orders.create", key = "#p0")
     fun place(requestId: String): IdempotencyResult<String> {
         jdbc.update("INSERT INTO demo_order (id) VALUES (?)", requestId)
@@ -36,7 +29,6 @@ class OrderService(
     }
 }
 
-/** Exposes a repeatable request for inspecting execution and duplicate spans. */
 @RestController
 class OrderController(
     private val orders: OrderService,
@@ -45,12 +37,6 @@ class OrderController(
 ) {
     private val logger = LoggerFactory.getLogger(javaClass)
 
-    /**
-     * Runs a browser-friendly demo request and exposes its HTTP trace for inspection.
-     * This GET deliberately creates sample data; it is a demo endpoint, not a production API design.
-     * @param requestId Stable identity; reloading the same URL demonstrates a duplicate.
-     * @return Execution status, identity, and the active request's trace ID and propagation header.
-     */
     @GetMapping("/demo/orders/{requestId}")
     fun create(
         @PathVariable requestId: String,

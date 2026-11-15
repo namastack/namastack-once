@@ -25,11 +25,9 @@ import java.util.concurrent.TimeUnit.SECONDS
 interface OnceCleanupContract : OnceDatabaseTestSupport {
     @Test
     fun `cleanup rejects a wrong manager even when an outer transaction binds the correct datasource`() {
-        once.execute(
+        once.executeWithoutResult(
             request("protected").withRetentionPolicy(DurationIdempotencyRetentionPolicy(Duration.ofSeconds(1))),
-        ) {
-            IdempotencyResult.executed()
-        }
+        ) { }
         clock.advance(Duration.ofSeconds(1))
         val otherDataSource = createTestMarkerDataSource("once_marker")
         val wrongCleanup = createTestRepository(dataSource, JdbcTransactionManager(otherDataSource))
@@ -48,18 +46,17 @@ interface OnceCleanupContract : OnceDatabaseTestSupport {
         val retainedRequest =
             request("retained")
                 .withRetentionPolicy(DurationIdempotencyRetentionPolicy(Duration.ofDays(2)))
-        once.execute(retainedRequest) {
+        once.executeWithoutResult(retainedRequest) {
             effect("before-cleanup")
-            IdempotencyResult.executed()
         }
 
         clock.advance(Duration.ofDays(2).minusNanos(1000))
-        assertThat(once.execute<Void?>(retainedRequest) { error("marker still exists") }.wasExecuted()).isFalse()
+        assertThat(once.executeWithoutResult(retainedRequest) { error("marker still exists") }.wasExecuted()).isFalse()
         clock.advance(Duration.ofNanos(1000))
 
         val unlimitedRequest = retainedRequest.withRetentionPolicy(ForeverIdempotencyRetentionPolicy)
         assertThat(
-            once.execute<Void?>(unlimitedRequest) { error("eligible marker still exists") }.wasExecuted(),
+            once.executeWithoutResult(unlimitedRequest) { error("eligible marker still exists") }.wasExecuted(),
         ).isFalse()
         assertThat(markers()).isEqualTo(1)
         assertThat(effects()).isEqualTo(1)
@@ -69,9 +66,8 @@ interface OnceCleanupContract : OnceDatabaseTestSupport {
         assertThat(markers()).isZero()
         assertThat(
             once
-                .execute(retainedRequest) {
+                .executeWithoutResult(retainedRequest) {
                     effect("after-cleanup")
-                    IdempotencyResult.executed()
                 }.wasExecuted(),
         ).isTrue()
         assertThat(markers()).isEqualTo(1)
@@ -80,11 +76,15 @@ interface OnceCleanupContract : OnceDatabaseTestSupport {
 
     @Test
     fun `forever markers do not expire and invalid policies do not invoke the action`() {
-        once.execute<Void?>(request("forever")) { IdempotencyResult.executed() }
+        once.executeWithoutResult(request("forever")) { }
         clock.advance(Duration.ofDays(3650))
-        assertThat(once.execute<Void?>(request("forever")) { error("must skip") }.wasExecuted()).isFalse()
+        assertThat(once.executeWithoutResult(request("forever")) { error("must skip") }.wasExecuted()).isFalse()
         val invalid = request("invalid").withRetentionPolicy { _, createdAt -> Optional.of(createdAt) }
-        assertThatIllegalArgumentException().isThrownBy { once.execute<Void?>(invalid) { error("must not execute") } }
+        assertThatIllegalArgumentException().isThrownBy {
+            once.executeWithoutResult(
+                invalid,
+            ) { error("must not execute") }
+        }
         assertThat(markers()).isEqualTo(1)
     }
 
@@ -96,7 +96,7 @@ interface OnceCleanupContract : OnceDatabaseTestSupport {
             clock.advance(Duration.ofNanos(123456000))
             val createdAt = clock.instant().truncatedTo(MICROS)
             val finite = request("utc").withRetentionPolicy(DurationIdempotencyRetentionPolicy(Duration.ofSeconds(1)))
-            once.execute(finite) { IdempotencyResult.executed() }
+            once.executeWithoutResult(finite) { }
             val timestamps =
                 jdbc.queryForObject("SELECT created_at, expires_at FROM once_marker") { row, _ ->
                     row.getObject("created_at", LocalDateTime::class.java) to
@@ -115,11 +115,9 @@ interface OnceCleanupContract : OnceDatabaseTestSupport {
     fun `cleanup deletes only the configured batch and preserves forever markers`() {
         val finite = DurationIdempotencyRetentionPolicy(Duration.ofSeconds(1))
         repeat(3) { index ->
-            once.execute<Void?>(request("expired-$index").withRetentionPolicy(finite)) {
-                IdempotencyResult.executed()
-            }
+            once.executeWithoutResult(request("expired-$index").withRetentionPolicy(finite)) { }
         }
-        once.execute<Void?>(request("keep")) { IdempotencyResult.executed() }
+        once.executeWithoutResult(request("keep")) { }
         clock.advance(Duration.ofSeconds(1))
         val store = markerRepository
         val firstBatch = store.cleanup(clock.instant(), 2)
@@ -136,9 +134,7 @@ interface OnceCleanupContract : OnceDatabaseTestSupport {
     fun `repository cleanup commits independently when the enclosing business transaction rolls back`() {
         val retentionPolicy = DurationIdempotencyRetentionPolicy(Duration.ofSeconds(1))
         val cleanupRequest = request("cleanup-independent").withRetentionPolicy(retentionPolicy)
-        once.execute(cleanupRequest) {
-            IdempotencyResult.executed()
-        }
+        once.executeWithoutResult(cleanupRequest) { }
         clock.advance(Duration.ofSeconds(1))
         val repository = markerRepository
 
@@ -157,21 +153,18 @@ interface OnceCleanupContract : OnceDatabaseTestSupport {
     fun `one cleanup pass drains multiple batches and preserves retained markers and business data`() {
         val shortRetention = DurationIdempotencyRetentionPolicy(Duration.ofSeconds(1))
         repeat(5) { index ->
-            once.execute(request("cleanup-$index").withRetentionPolicy(shortRetention)) {
+            once.executeWithoutResult(request("cleanup-$index").withRetentionPolicy(shortRetention)) {
                 effect("cleanup-$index")
-                IdempotencyResult.executed()
             }
         }
-        once.execute(request("cleanup-forever")) {
+        once.executeWithoutResult(request("cleanup-forever")) {
             effect("cleanup-forever")
-            IdempotencyResult.executed()
         }
         val futureRequest =
             request("cleanup-future")
                 .withRetentionPolicy(DurationIdempotencyRetentionPolicy(Duration.ofDays(1)))
-        once.execute(futureRequest) {
+        once.executeWithoutResult(futureRequest) {
             effect("cleanup-future")
-            IdempotencyResult.executed()
         }
         clock.advance(Duration.ofSeconds(1))
 
@@ -180,20 +173,20 @@ interface OnceCleanupContract : OnceDatabaseTestSupport {
         assertThat(markers()).isEqualTo(2)
         assertThat(effects()).isEqualTo(7)
         assertThat(
-            once.execute<Void?>(request("cleanup-forever")) { error("forever marker must remain") }.wasExecuted(),
+            once.executeWithoutResult(request("cleanup-forever")) { error("forever marker must remain") }.wasExecuted(),
         ).isFalse()
-        assertThat(once.execute<Void?>(futureRequest) { error("future marker must remain") }.wasExecuted()).isFalse()
+        assertThat(
+            once.executeWithoutResult(futureRequest) { error("future marker must remain") }.wasExecuted(),
+        ).isFalse()
     }
 
     @Test
     fun `concurrent cleanup workers drain expired markers without deleting retained identities`() {
         val shortRetention = DurationIdempotencyRetentionPolicy(Duration.ofSeconds(1))
         repeat(9) { index ->
-            once.execute(request("parallel-cleanup-$index").withRetentionPolicy(shortRetention)) {
-                IdempotencyResult.executed()
-            }
+            once.executeWithoutResult(request("parallel-cleanup-$index").withRetentionPolicy(shortRetention)) { }
         }
-        once.execute(request("parallel-cleanup-keep")) { IdempotencyResult.executed() }
+        once.executeWithoutResult(request("parallel-cleanup-keep")) { }
         clock.advance(Duration.ofSeconds(1))
 
         val cleanupWorkers = List(2) { CleanupFixture(markerRepository, clock) }
@@ -218,7 +211,7 @@ interface OnceCleanupContract : OnceDatabaseTestSupport {
         assertThat(markers()).isEqualTo(1)
         assertThat(
             once
-                .execute<Void?>(
+                .executeWithoutResult(
                     request("parallel-cleanup-keep"),
                 ) { error("retained identity must remain") }
                 .wasExecuted(),

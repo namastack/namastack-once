@@ -26,6 +26,7 @@ import org.springframework.boot.test.web.server.LocalServerPort
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Import
 import org.springframework.jdbc.core.JdbcTemplate
+import org.springframework.jdbc.core.queryForObject
 import org.springframework.kafka.core.KafkaTemplate
 import org.springframework.test.context.DynamicPropertyRegistry
 import org.springframework.test.context.DynamicPropertySource
@@ -152,7 +153,6 @@ class CombinedTracingTest {
         assertThat(listOf(producer, schedule, attempt, handler, kafkaSend, kafkaReceive, consumer).map { it.traceId })
             .containsOnly(root.traceId)
 
-        // A second publication with the same event identity simulates redelivery to billing.
         Observation.createNotStarted("test.redelivery", registry).observe {
             TransactionTemplate(manager).executeWithoutResult { outbox.schedule(OrderPlaced(id), id) }
         }
@@ -177,7 +177,6 @@ class CombinedTracingTest {
                     .map { it.attributes.get(AttributeKey.stringKey("once.outcome")) },
             ).containsExactly("executed", "duplicate")
         }
-        // The header, not the payload or partition key, determines the Once identity.
         val changedPayload = "$id-changed-payload"
         val record = ProducerRecord<String, String>(KafkaConfiguration.ORDERS_TOPIC, changedPayload, changedPayload)
         record.headers().add(RecordHeader(OutboxHeaders.IDEMPOTENCY_KEY, id.toByteArray(Charsets.UTF_8)))
@@ -189,8 +188,8 @@ class CombinedTracingTest {
                     .map { it.attributes.get(AttributeKey.stringKey("once.outcome")) },
             ).containsExactly("executed", "duplicate", "duplicate")
         }
-        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM demo_order", Int::class.java)).isEqualTo(1)
-        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM demo_invoice", Int::class.java)).isEqualTo(1)
+        assertThat(jdbc.queryForObject<Int>("SELECT COUNT(*) FROM demo_order")).isEqualTo(1)
+        assertThat(jdbc.queryForObject<Int>("SELECT COUNT(*) FROM demo_invoice")).isEqualTo(1)
     }
 
     @TestConfiguration(proxyBeanMethods = false)

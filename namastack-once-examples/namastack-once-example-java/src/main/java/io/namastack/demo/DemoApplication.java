@@ -1,29 +1,32 @@
 package io.namastack.demo;
 
 import java.util.UUID;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.boot.CommandLineRunner;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 
-/**
- * Standalone annotated example with application-owned SQL initialization.
- */
 @SpringBootApplication
-public class DemoApplication {
-  /**
-   * Invokes one command twice to demonstrate fresh execution and duplicate detection.
-   *
-   * @param args command-line arguments forwarded to Spring Boot
-   */
+public class DemoApplication implements CommandLineRunner {
+  private static final Logger logger = LoggerFactory.getLogger(DemoApplication.class);
+  private final IdempotentOrderHandler orders;
+
+  public DemoApplication(IdempotentOrderHandler orders) {
+    this.orders = orders;
+  }
+
   public static void main(String[] args) {
-    try (var applicationContext = SpringApplication.run(DemoApplication.class, args)) {
-      var orderHandler = applicationContext.getBean(IdempotentOrderHandler.class);
-      var command = new OrderCommand(UUID.randomUUID(), "order-" + UUID.randomUUID());
+    SpringApplication.run(DemoApplication.class, args);
+  }
 
-      var firstResult = orderHandler.handle(command);
-      var duplicateResult = orderHandler.handle(command);
+  @Override
+  public void run(String... args) {
+    var command = new OrderCommand(UUID.randomUUID(), "order-" + UUID.randomUUID());
+    var firstResult = orders.handle(command);
+    var duplicateResult = orders.handle(command);
 
-      System.out.println("First call executed: " + firstResult.wasExecuted());
-      System.out.println("Second call executed: " + duplicateResult.wasExecuted());
-    }
+    logger.info("First call executed: {}", firstResult.wasExecuted());
+    logger.info("Second call executed: {}", duplicateResult.wasExecuted());
   }
 }

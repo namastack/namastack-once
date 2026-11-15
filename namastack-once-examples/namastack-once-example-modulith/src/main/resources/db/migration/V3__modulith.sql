@@ -1,4 +1,3 @@
--- Application-owned copy of the Spring Modulith 2.1.2 H2 publication schema.
 CREATE TABLE IF NOT EXISTS EVENT_PUBLICATION
 (
   ID                     UUID NOT NULL,

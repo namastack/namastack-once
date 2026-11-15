@@ -6,6 +6,7 @@ import io.namastack.once.config.OnceCoreSchedulingAutoConfiguration
 import io.namastack.once.config.OnceCoreThreadingAutoConfiguration
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
+import org.springframework.beans.factory.getBean
 import org.springframework.boot.autoconfigure.AutoConfigurations
 import org.springframework.boot.autoconfigure.task.TaskSchedulingAutoConfiguration
 import org.springframework.boot.test.context.runner.ApplicationContextRunner
@@ -39,7 +40,7 @@ class OnceCoreSchedulingAutoConfigurationTest {
                 context.getBean(OnceCleanupScheduler.SCHEDULER_NAME),
             ).isInstanceOf(ThreadPoolTaskScheduler::class.java)
 
-            context.getBean(OnceCleanupScheduler::class.java).cleanup()
+            context.getBean<OnceCleanupScheduler>().cleanup()
 
             assertThat(repository.cutoffs).containsExactlyElementsOf(List(3) { cutoff.truncatedTo(MICROS) })
             assertThat(repository.batchSizes).containsExactly(1000, 1000, 1000)
@@ -57,12 +58,12 @@ class OnceCoreSchedulingAutoConfigurationTest {
                 "namastack.once.cleanup.shutdown-timeout=3s",
             ).run { context ->
                 assertThat(context).hasNotFailed()
-                val properties = context.getBean(OnceCleanupProperties::class.java)
+                val properties = context.getBean<OnceCleanupProperties>()
                 assertThat(properties.interval).isEqualTo(Duration.ofMinutes(2))
                 assertThat(properties.batchSize).isEqualTo(600)
                 assertThat(properties.shutdownTimeout).isEqualTo(Duration.ofSeconds(3))
 
-                context.getBean(OnceCleanupScheduler::class.java).cleanup()
+                context.getBean<OnceCleanupScheduler>().cleanup()
 
                 assertThat(repository.batchSizes).containsExactly(600, 600, 600, 600)
                 assertThat(repository.remainingMarkers).isZero()
@@ -100,7 +101,7 @@ class OnceCoreSchedulingAutoConfigurationTest {
                 .run { context ->
                     assertThat(context).hasNotFailed()
                     assertThat(context).hasSingleBean(OnceCleanupScheduler::class.java)
-                    assertThat(context.getBean(OnceCleanupScheduler::class.java)).isSameAs(customCleanup)
+                    assertThat(context.getBean<OnceCleanupScheduler>()).isSameAs(customCleanup)
                 }
         } finally {
             scheduler.destroy()

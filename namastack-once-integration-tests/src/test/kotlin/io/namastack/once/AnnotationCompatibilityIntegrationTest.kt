@@ -16,6 +16,8 @@ import org.springframework.beans.factory.support.RootBeanDefinition
 import org.springframework.core.annotation.AliasFor
 import org.springframework.core.io.ClassPathResource
 import org.springframework.jdbc.core.JdbcTemplate
+import org.springframework.jdbc.core.queryForList
+import org.springframework.jdbc.core.queryForObject
 import org.springframework.jdbc.datasource.DriverManagerDataSource
 import org.springframework.jdbc.datasource.init.ResourceDatabasePopulator
 import org.springframework.jdbc.support.JdbcTransactionManager
@@ -60,9 +62,9 @@ class AnnotationCompatibilityIntegrationTest {
             second.handle("same-key")
         }
 
-        assertThat(jdbc.queryForList("SELECT scope FROM once_marker", String::class.java))
+        assertThat(jdbc.queryForList<String>("SELECT scope FROM once_marker"))
             .containsExactlyInAnyOrder("first", "second")
-        assertThat(jdbc.queryForList("SELECT id FROM business_effect", String::class.java))
+        assertThat(jdbc.queryForList<String>("SELECT id FROM business_effect"))
             .containsExactlyInAnyOrder("first-same-key", "second-same-key")
     }
 
@@ -72,8 +74,8 @@ class AnnotationCompatibilityIntegrationTest {
 
         repeat(2) { handler.handle("generic-key") }
 
-        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM business_effect", Int::class.java)).isEqualTo(1)
-        assertThat(jdbc.queryForObject("SELECT scope FROM once_marker", String::class.java)).isEqualTo("generic")
+        assertThat(jdbc.queryForObject<Int>("SELECT COUNT(*) FROM business_effect")).isEqualTo(1)
+        assertThat(jdbc.queryForObject<String>("SELECT scope FROM once_marker")).isEqualTo("generic")
     }
 
     @Test
@@ -92,15 +94,15 @@ class AnnotationCompatibilityIntegrationTest {
 
         repeat(2) { handler.handle("qualified-key") }
 
-        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM business_effect", Int::class.java)).isEqualTo(1)
-        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM once_marker", Int::class.java)).isEqualTo(1)
+        assertThat(jdbc.queryForObject<Int>("SELECT COUNT(*) FROM business_effect")).isEqualTo(1)
+        assertThat(jdbc.queryForObject<Int>("SELECT COUNT(*) FROM once_marker")).isEqualTo(1)
     }
 
     @Test
     fun `overridden methods inherit superclass key annotations`() {
         val handler = proxy(InheritedKeyHandler(jdbc))
         repeat(2) { handler.handle("inherited-key") }
-        assertThat(jdbc.queryForList("SELECT id FROM business_effect", String::class.java))
+        assertThat(jdbc.queryForList<String>("SELECT id FROM business_effect"))
             .containsExactly("inherited-key")
     }
 
@@ -108,7 +110,7 @@ class AnnotationCompatibilityIntegrationTest {
     fun `generic superclass keys survive multiple inheritance levels and bridge methods`() {
         val handler = proxy(GenericKeyHandler(jdbc))
         repeat(2) { handler.handle("generic-base-key") }
-        assertThat(jdbc.queryForList("SELECT id FROM business_effect", String::class.java))
+        assertThat(jdbc.queryForList<String>("SELECT id FROM business_effect"))
             .containsExactly("generic-base-key")
     }
 
@@ -116,7 +118,7 @@ class AnnotationCompatibilityIntegrationTest {
     fun `repeating a superclass key annotation does not introduce a competing key`() {
         val handler = proxy(RepeatedKeyHandler(jdbc))
         repeat(2) { handler.handle("repeated-key") }
-        assertThat(jdbc.queryForList("SELECT id FROM business_effect", String::class.java))
+        assertThat(jdbc.queryForList<String>("SELECT id FROM business_effect"))
             .containsExactly("repeated-key")
     }
 
@@ -131,9 +133,9 @@ class AnnotationCompatibilityIntegrationTest {
     fun `composed annotation aliases use Spring merged annotation semantics`() {
         val handler = proxy(AliasedHandler(jdbc))
         repeat(2) { handler.handle("aliased-key") }
-        assertThat(jdbc.queryForList("SELECT scope FROM once_marker", String::class.java))
+        assertThat(jdbc.queryForList<String>("SELECT scope FROM once_marker"))
             .containsExactly("alias-scope")
-        assertThat(jdbc.queryForList("SELECT id FROM business_effect", String::class.java))
+        assertThat(jdbc.queryForList<String>("SELECT id FROM business_effect"))
             .containsExactly("aliased-key")
     }
 

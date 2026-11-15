@@ -12,7 +12,9 @@ import kotlin.reflect.KClass
  *
  * Methods return `void`/Kotlin `Unit`, or the parameterized [IdempotencyResult] interface. A result
  * body returns [Executed]; the proxy supplies [Duplicate] when the body is skipped. Void methods
- * discard that same result. Calls must pass through a Spring proxy; self-invocation is unsupported.
+ * discard that same result. Null wrappers and application-supplied duplicates cause an
+ * IllegalStateException and rollback before commit. An Executed value may itself be null.
+ * Calls must pass through a Spring proxy; self-invocation is unsupported.
  *
  * With Spring asynchronous method execution enabled, async adapters must return void/Unit. Once
  * starts and completes its own transaction on the worker thread. Existing transactions are rejected.

@@ -3,6 +3,7 @@ package io.namastack.once
 import io.namastack.once.config.JdbcDatabaseType
 import io.namastack.once.query.JdbcOnceMarkerQueriesFactory
 import org.springframework.jdbc.core.JdbcTemplate
+import org.springframework.jdbc.core.queryForObject
 import org.springframework.transaction.PlatformTransactionManager
 import javax.sql.DataSource
 
@@ -21,9 +22,9 @@ interface OnceDatabaseTestSupport {
         jdbc.update("INSERT INTO business_effect (id, amount) VALUES (?, ?)", id, 1)
     }
 
-    fun effects(): Int = checkNotNull(jdbc.queryForObject("SELECT COUNT(*) FROM business_effect", Int::class.java))
+    fun effects(): Int = checkNotNull(jdbc.queryForObject<Int>("SELECT COUNT(*) FROM business_effect"))
 
-    fun markers(): Int = checkNotNull(jdbc.queryForObject("SELECT COUNT(*) FROM once_marker", Int::class.java))
+    fun markers(): Int = checkNotNull(jdbc.queryForObject<Int>("SELECT COUNT(*) FROM once_marker"))
 }
 
 fun createTestRepository(

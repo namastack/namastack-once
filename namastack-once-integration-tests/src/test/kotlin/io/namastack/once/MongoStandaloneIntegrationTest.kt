@@ -31,9 +31,8 @@ class MongoStandaloneIntegrationTest {
             var actionExecuted = false
 
             assertThatThrownBy {
-                once.execute(IdempotencyRequest.of("standalone", "key")) {
+                once.executeWithoutResult(IdempotencyRequest.of("standalone", "key")) {
                     actionExecuted = true
-                    IdempotencyResult.executed()
                 }
             }.satisfies({ failure ->
                 val mongoFailure =

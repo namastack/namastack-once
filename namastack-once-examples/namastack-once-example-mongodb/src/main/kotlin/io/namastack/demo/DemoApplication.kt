@@ -1,45 +1,27 @@
 package io.namastack.demo
 
-import io.namastack.once.IdempotencyOperations
-import io.namastack.once.IdempotencyRequest
-import io.namastack.once.IdempotencyResult
+import org.slf4j.LoggerFactory
+import org.springframework.boot.CommandLineRunner
 import org.springframework.boot.autoconfigure.SpringBootApplication
 import org.springframework.boot.runApplication
 import java.util.UUID
 
-/**
- * Configures the standalone MongoDB idempotency example.
- *
- * The application explicitly provisions its sample collections and marker expiry index.
- *
- * @author Roland Beisel
- * @since 0.1.0
- */
 @SpringBootApplication
-class DemoApplication
+class DemoApplication(
+    private val orders: ProgrammaticOrderHandler,
+) : CommandLineRunner {
+    private val logger = LoggerFactory.getLogger(DemoApplication::class.java)
 
-/**
- * Runs the same request twice to demonstrate fresh execution followed by duplicate detection.
- *
- * @param args Command-line arguments forwarded to Spring Boot.
- */
-fun main(args: Array<String>) {
-    runApplication<DemoApplication>(*args).use { applicationContext ->
-        val idempotencyOperations = applicationContext.getBean(IdempotencyOperations::class.java)
-        val createOrderUseCase = applicationContext.getBean(CreateOrderUseCase::class.java)
+    override fun run(vararg args: String) {
         val command = OrderCommand(UUID.randomUUID(), "order-${UUID.randomUUID()}")
-        val request = IdempotencyRequest.of("order.create", command.requestId)
+        val firstResult = orders.handle(command)
+        val duplicateResult = orders.handle(command)
 
-        val firstResult =
-            idempotencyOperations.execute(request) {
-                IdempotencyResult.executed(createOrderUseCase.create(command))
-            }
-        val duplicateResult =
-            idempotencyOperations.execute(request) {
-                IdempotencyResult.executed(createOrderUseCase.create(command))
-            }
-
-        println("First call executed: ${firstResult.wasExecuted()}")
-        println("Second call executed: ${duplicateResult.wasExecuted()}")
+        logger.info("First call executed: {}", firstResult.wasExecuted())
+        logger.info("Second call executed: {}", duplicateResult.wasExecuted())
     }
+}
+
+fun main(args: Array<String>) {
+    runApplication<DemoApplication>(*args)
 }

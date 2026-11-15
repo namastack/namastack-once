@@ -1,5 +1,3 @@
--- Application-managed migration for Namastack Once 0.1.0 (h2).
--- Once never runs this script automatically.
 CREATE TABLE IF NOT EXISTS orders_once (
     idempotency_hash CHAR(64) NOT NULL PRIMARY KEY,
     scope VARCHAR(200) NOT NULL,
@@ -8,8 +6,6 @@ CREATE TABLE IF NOT EXISTS orders_once (
 );
 CREATE INDEX IF NOT EXISTS ix_orders_once_expires_at ON orders_once (expires_at);
 
--- Application-managed migration for Namastack Once 0.1.0 (h2).
--- Once never runs this script automatically.
 CREATE TABLE IF NOT EXISTS billing_once (
     idempotency_hash CHAR(64) NOT NULL PRIMARY KEY,
     scope VARCHAR(200) NOT NULL,

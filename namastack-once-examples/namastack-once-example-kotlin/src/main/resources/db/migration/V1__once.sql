@@ -1,5 +1,3 @@
--- Application-managed migration for Namastack Once 0.1.0 (h2).
--- Once never runs this script automatically.
 CREATE TABLE IF NOT EXISTS once_marker (
     idempotency_hash CHAR(64) NOT NULL PRIMARY KEY,
     scope VARCHAR(200) NOT NULL,

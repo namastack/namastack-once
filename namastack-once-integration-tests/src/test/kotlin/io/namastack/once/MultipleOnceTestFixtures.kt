@@ -15,6 +15,7 @@ import org.springframework.context.annotation.Configuration
 import org.springframework.context.annotation.Primary
 import org.springframework.core.io.ClassPathResource
 import org.springframework.jdbc.core.JdbcTemplate
+import org.springframework.jdbc.core.queryForObject
 import org.springframework.jdbc.datasource.DriverManagerDataSource
 import org.springframework.jdbc.support.JdbcTransactionManager
 import org.springframework.transaction.PlatformTransactionManager
@@ -38,7 +39,7 @@ fun multipleOnceTestApplicationContext(): ApplicationContextRunner =
 fun countMarkerRows(
     dataSource: DataSource,
     table: String,
-): Int = checkNotNull(JdbcTemplate(dataSource).queryForObject("SELECT COUNT(*) FROM $table", Int::class.java))
+): Int = checkNotNull(JdbcTemplate(dataSource).queryForObject<Int>("SELECT COUNT(*) FROM $table"))
 
 fun createTestOnce(
     dataSource: DataSource,

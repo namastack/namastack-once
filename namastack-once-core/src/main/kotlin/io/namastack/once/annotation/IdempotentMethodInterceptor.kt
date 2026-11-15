@@ -83,14 +83,15 @@ class IdempotentMethodInterceptor(
     private fun invokeProtectedMethod(
         invocation: MethodInvocation,
         methodMetadata: IdempotentMethodMetadata,
-    ): IdempotencyResult<Any?> {
+    ): Any? {
         val methodResult = invocation.proceed()
 
-        if (methodMetadata.returnsVoid) return IdempotencyResult.executed(null)
+        if (methodMetadata.returnsVoid) return null
 
-        check(methodResult is IdempotencyResult<*>) { "Annotated method must return a non-null IdempotencyResult" }
+        check(methodResult is IdempotencyResult.Executed<*>) {
+            "@Idempotent methods must return a non-null Executed result"
+        }
 
-        @Suppress("UNCHECKED_CAST")
-        return methodResult as IdempotencyResult<Any?>
+        return methodResult.value
     }
 }

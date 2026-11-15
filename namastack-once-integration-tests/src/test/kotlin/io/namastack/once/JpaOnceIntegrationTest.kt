@@ -43,14 +43,13 @@ class JpaOnceIntegrationTest : AbstractOnceIntegrationTest() {
     @Test
     fun `ORM writes commit with the JDBC marker and both roll back on failure`() {
         val entityManager = SharedEntityManagerCreator.createSharedEntityManager(checkNotNull(factory.`object`))
-        once.execute(request("jpa-success")) {
+        once.executeWithoutResult(request("jpa-success")) {
             entityManager.persist(BusinessEffectEntity("jpa-success", 1))
-            IdempotencyResult.executed()
         }
         assertThat(effects()).isEqualTo(1)
         assertThat(markers()).isEqualTo(1)
         assertThatThrownBy {
-            once.execute<Void?>(request("jpa-failure")) {
+            once.executeWithoutResult(request("jpa-failure")) {
                 entityManager.persist(BusinessEffectEntity("jpa-failure", 1))
                 entityManager.flush()
                 error("application failure")

@@ -4,6 +4,7 @@ import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.condition.EnabledForJreRange
 import org.junit.jupiter.api.condition.JRE
+import org.springframework.beans.factory.getBean
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.scheduling.concurrent.SimpleAsyncTaskScheduler
 import org.springframework.scheduling.concurrent.ThreadPoolTaskScheduler
@@ -22,10 +23,10 @@ class OnceCleanupAutoConfigurationIntegrationTest {
             .withBean(AnnotatedOrderHandler::class.java)
             .run { context ->
                 assertThat(context).hasNotFailed()
-                context.getBean(AnnotatedOrderHandler::class.java).expiring("cleanup")
-                context.getBean(MutableOnceClock::class.java).advance(Duration.ofDays(2))
-                context.getBean(OnceCleanupScheduler::class.java).cleanup()
-                val jdbc = context.getBean(JdbcTemplate::class.java)
+                context.getBean<AnnotatedOrderHandler>().expiring("cleanup")
+                context.getBean<MutableOnceClock>().advance(Duration.ofDays(2))
+                context.getBean<OnceCleanupScheduler>().cleanup()
+                val jdbc = context.getBean<JdbcTemplate>()
                 assertThat(countOnceRows(jdbc, "once_marker")).isZero()
                 assertThat(countOnceRows(jdbc, "business_effect")).isEqualTo(1)
             }
@@ -42,7 +43,7 @@ class OnceCleanupAutoConfigurationIntegrationTest {
             assertThat(
                 context.getBean(OnceCleanupScheduler.SCHEDULER_NAME),
             ).isInstanceOf(ThreadPoolTaskScheduler::class.java)
-            assertThat(context.getBean(OnceCleanupScheduler::class.java).isRunning).isTrue()
+            assertThat(context.getBean<OnceCleanupScheduler>().isRunning).isTrue()
             assertThat(
                 context.beanFactory.getBeanDefinition(OnceCleanupScheduler.SCHEDULER_NAME).isAutowireCandidate,
             ).isFalse()
@@ -66,7 +67,7 @@ class OnceCleanupAutoConfigurationIntegrationTest {
                 assertThat(context).hasNotFailed()
                 assertThat(context.getBean(OnceCleanupScheduler.SCHEDULER_NAME)).isSameAs(scheduler)
                 check(scheduledPassCompleted.await(10, SECONDS))
-                context.getBean(OnceCleanupScheduler::class.java).stop()
+                context.getBean<OnceCleanupScheduler>().stop()
                 assertThat(scheduler.scheduledThreadPoolExecutor.isShutdown).isFalse()
             }
         assertThat(scheduler.scheduledThreadPoolExecutor.isShutdown).isTrue()
@@ -82,7 +83,7 @@ class OnceCleanupAutoConfigurationIntegrationTest {
                 assertThat(
                     context.getBean(OnceCleanupScheduler.SCHEDULER_NAME),
                 ).isInstanceOf(SimpleAsyncTaskScheduler::class.java)
-                assertThat(context.getBean(OnceCleanupScheduler::class.java).isRunning).isTrue()
+                assertThat(context.getBean<OnceCleanupScheduler>().isRunning).isTrue()
             }
     }
 

@@ -12,6 +12,11 @@
 Each example is an independent Gradle project, like Namastack Outbox examples. Shared dependency
 versions live in `gradle/libs.versions.toml`. Use `-PonceSource=../..` inside an example to test the
 source checkout through Gradle composite substitution, or publish the root build to Maven local.
-No broker, messaging integration, or observability module is required.
+The command-line examples use constructor injection and `CommandLineRunner`, matching the Outbox
+examples. Their `main` methods only start Spring Boot. Programmatic Once calls live in
+`ProgrammaticOrderHandler`; annotated calls live in `IdempotentOrderHandler` or event listeners.
+The tracing example exposes HTTP endpoints instead.
+
+No broker, messaging integration, or observability module is required for the basic examples.
 
 - [Once + Outbox tracing](namastack-once-example-outbox-tracing): shared traces across browser GET requests, Outbox publication, Kafka, and an idempotent invoice consumer.

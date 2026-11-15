@@ -5,11 +5,11 @@ import io.micrometer.observation.ObservationHandler
 import io.micrometer.observation.ObservationRegistry
 import io.namastack.once.IdempotencyOperations
 import io.namastack.once.IdempotencyRequest
-import io.namastack.once.IdempotencyResult
 import io.namastack.once.config.JdbcOnceAutoConfiguration
 import io.namastack.once.config.OnceCoreInfrastructureAutoConfiguration
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
+import org.springframework.beans.factory.getBean
 import org.springframework.boot.autoconfigure.AutoConfigurations
 import org.springframework.boot.test.context.runner.ApplicationContextRunner
 import org.springframework.jdbc.core.JdbcTemplate
@@ -49,7 +49,7 @@ class OnceObservabilityAutoConfigurationTest {
         runner
             .withBean(ObservationRegistry::class.java, Supplier { registry })
             .withBean(MicrometerOnceInstrumentation::class.java, Supplier { custom })
-            .run { assertThat(it.getBean(MicrometerOnceInstrumentation::class.java)).isSameAs(custom) }
+            .run { assertThat(it.getBean<MicrometerOnceInstrumentation>()).isSameAs(custom) }
     }
 
     @Test
@@ -81,9 +81,7 @@ class OnceObservabilityAutoConfigurationTest {
             .withBean(OnceExecuteObservationConvention::class.java, Supplier { custom })
             .run {
                 assertThat(it).hasNotFailed()
-                it.getBean(IdempotencyOperations::class.java).execute(IdempotencyRequest.of("orders", "1")) {
-                    IdempotencyResult.executed()
-                }
+                it.getBean<IdempotencyOperations>().executeWithoutResult(IdempotencyRequest.of("orders", "1")) {}
                 assertThat(contexts.map { context -> context.name }).containsExactly("custom.once")
             }
     }

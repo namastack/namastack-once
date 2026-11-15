@@ -3,7 +3,6 @@ package io.namastack.once
 import com.mongodb.MongoException
 import com.mongodb.client.MongoClient
 import com.mongodb.client.MongoClients
-import io.namastack.once.IdempotencyResult.Duplicate
 import io.namastack.once.config.JdbcOnceAutoConfiguration
 import io.namastack.once.config.MongoOnceAutoConfiguration
 import io.namastack.once.config.OnceCoreInfrastructureAutoConfiguration
@@ -18,6 +17,7 @@ import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Tag
 import org.junit.jupiter.api.Test
+import org.springframework.beans.factory.getBean
 import org.springframework.boot.autoconfigure.AutoConfigurations
 import org.springframework.boot.autoconfigure.task.TaskSchedulingAutoConfiguration
 import org.springframework.boot.test.context.runner.ApplicationContextRunner
@@ -27,6 +27,7 @@ import org.springframework.data.mongodb.MongoDatabaseFactory
 import org.springframework.data.mongodb.MongoTransactionManager
 import org.springframework.data.mongodb.core.MongoTemplate
 import org.springframework.data.mongodb.core.SimpleMongoClientDatabaseFactory
+import org.springframework.data.mongodb.core.findOne
 import org.springframework.data.mongodb.core.index.Index
 import org.springframework.data.mongodb.core.query.Query
 import org.springframework.jdbc.support.JdbcTransactionManager
@@ -110,12 +111,14 @@ class MongoOnceIntegrationTest {
             }
         contextRunner().withBean(OnceInstrumentation::class.java, Supplier { instrumentation }).run { context ->
             assertThat(context).hasNotFailed()
-            val configured = context.getBean(IdempotencyOperations::class.java)
-            configured.execute(expiring("observed")) { IdempotencyResult.executed() }
-            assertThat(configured.execute<Void?>(expiring("observed")) { error("must skip") }.wasExecuted()).isFalse()
+            val configured = context.getBean<IdempotencyOperations>()
+            configured.executeWithoutResult(expiring("observed")) { }
+            assertThat(
+                configured.executeWithoutResult(expiring("observed")) { error("must skip") }.wasExecuted(),
+            ).isFalse()
             clock.advance(Duration.ofSeconds(1))
             assertThat(
-                context.getBean(IdempotencyMarkerRepository::class.java).cleanup(clock.instant(), 2),
+                context.getBean<IdempotencyMarkerRepository>().cleanup(clock.instant(), 2),
             ).isEqualTo(1)
             assertThat(executions).isEqualTo(2)
             assertThat(cleanupBatches).isEqualTo(1)
@@ -128,7 +131,7 @@ class MongoOnceIntegrationTest {
         val first =
             once.execute(identity) {
                 effect("one")
-                IdempotencyResult.executed("fresh")
+                "fresh"
             }
         val duplicate = once.execute<String>(identity) { error("duplicate must skip") }
         assertThat(first.fold({ it }, { "duplicate" })).isEqualTo("fresh")
@@ -136,14 +139,14 @@ class MongoOnceIntegrationTest {
         assertThat(markers()).isEqualTo(1)
         assertThat(effects()).isEqualTo(1)
         assertThat(
-            mongo.findOne(Query(), Document::class.java, "once_marker")!!.getString("_id"),
+            mongo.findOne<Document>(Query(), "once_marker")!!.getString("_id"),
         ).matches("[0-9a-f]{64}")
     }
 
     @Test
     fun `action failure rolls back all writes and permits a later execution`() {
         assertThatThrownBy {
-            once.execute<Void?>(request("retry")) {
+            once.executeWithoutResult(request("retry")) {
                 effect("retry")
                 error("business failure")
             }
@@ -152,9 +155,8 @@ class MongoOnceIntegrationTest {
         assertThat(effects()).isZero()
         assertThat(
             once
-                .execute(request("retry")) {
+                .executeWithoutResult(request("retry")) {
                     effect("retry")
-                    IdempotencyResult.executed()
                 }.wasExecuted(),
         ).isTrue()
         assertThat(markers()).isEqualTo(1)
@@ -165,7 +167,7 @@ class MongoOnceIntegrationTest {
     fun `checked failures retain their identity after MongoDB rollback`() {
         val failure = IOException("application failure")
         assertThatThrownBy {
-            once.execute<Void?>(request("checked")) {
+            once.executeWithoutResult(request("checked")) {
                 effect("checked")
                 throw failure
             }
@@ -175,38 +177,30 @@ class MongoOnceIntegrationTest {
     }
 
     @Test
-    fun `invalid result wrappers roll back while null business values remain valid`() {
-        @Suppress("UNCHECKED_CAST")
-        val nullAction =
-            Supplier<IdempotencyResult<String>?> {
-                effect("null")
+    fun `null business values commit while duplicate actions are skipped`() {
+        val identity = request("null-value")
+        val result =
+            once.execute<String?>(identity) {
+                effect("null-value")
                 null
-            } as Supplier<IdempotencyResult<String>>
-        assertThatThrownBy { once.execute(request("null"), nullAction) }.isInstanceOf(IllegalStateException::class.java)
-        assertThatThrownBy {
-            once.execute<String>(request("fake")) {
-                effect("fake")
-                Duplicate(IdempotencyDuplicateContext("mongo.operation", "fake", "hash"))
             }
-        }.isInstanceOf(IllegalStateException::class.java)
-        assertThat(markers()).isZero()
-        assertThat(effects()).isZero()
-        assertThat(
-            once.execute(request("null-value")) { IdempotencyResult.executed<String?>(null) }.wasExecuted(),
-        ).isTrue()
+        assertThat(result).isEqualTo(IdempotencyResult.Executed<String?>(null))
+        assertThat(once.execute<String?>(identity) { error("must skip") }.wasExecuted()).isFalse()
+        assertThat(markers()).isEqualTo(1)
+        assertThat(effects()).isEqualTo(1)
     }
 
     @Test
     fun `ambient transactions and nested Once calls are rejected before protected work`() {
         TransactionTemplate(manager).executeWithoutResult {
-            assertThatThrownBy { once.execute<Void?>(request("ambient")) { error("must not run") } }
+            assertThatThrownBy { once.executeWithoutResult(request("ambient")) { error("must not run") } }
                 .isInstanceOf(IllegalStateException::class.java)
             effect("outer")
         }
         assertThatThrownBy {
-            once.execute<Void?>(request("nested")) {
+            once.executeWithoutResult(request("nested")) {
                 effect("nested")
-                once.execute(request("inner")) { IdempotencyResult.executed() }
+                once.executeWithoutResult(request("inner")) { }
             }
         }.isInstanceOf(IllegalStateException::class.java)
         assertThat(markers()).isZero()
@@ -216,12 +210,11 @@ class MongoOnceIntegrationTest {
     @Test
     fun `business services join Once and rollback-only never returns executed`() {
         assertThatThrownBy {
-            once.execute(request("rollback-only")) {
+            once.executeWithoutResult(request("rollback-only")) {
                 TransactionTemplate(manager).executeWithoutResult { status ->
                     effect("rollback-only")
                     status.setRollbackOnly()
                 }
-                IdempotencyResult.executed()
             }
         }.isInstanceOf(UnexpectedRollbackException::class.java)
         assertThat(markers()).isZero()
@@ -231,14 +224,13 @@ class MongoOnceIntegrationTest {
     @Test
     fun `retention permits cleanup and never replaces a marker that still exists`() {
         val identity = expiring("retained")
-        once.execute(identity) {
+        once.executeWithoutResult(identity) {
             effect("retained")
-            IdempotencyResult.executed()
         }
         clock.advance(Duration.ofSeconds(2))
-        assertThat(once.execute<Void?>(identity) { error("retained marker must skip") }.wasExecuted()).isFalse()
+        assertThat(once.executeWithoutResult(identity) { error("retained marker must skip") }.wasExecuted()).isFalse()
         assertThat(repository.cleanup(clock.instant(), 100)).isEqualTo(1)
-        assertThat(once.execute(identity) { IdempotencyResult.executed() }.wasExecuted()).isTrue()
+        assertThat(once.executeWithoutResult(identity) { }.wasExecuted()).isTrue()
         assertThat(effects()).isEqualTo(1)
     }
 
@@ -247,8 +239,8 @@ class MongoOnceIntegrationTest {
         clock = MutableOnceClock(Instant.parse("1970-01-01T00:00:00.123456789Z"))
         once = operations(repository, manager)
         val identity = request("micros").withRetentionPolicy(DurationIdempotencyRetentionPolicy(Duration.ofNanos(1000)))
-        once.execute(identity) { IdempotencyResult.executed() }
-        val marker = mongo.findOne(Query(), Document::class.java, "once_marker")!!
+        once.executeWithoutResult(identity) { }
+        val marker = mongo.findOne<Document>(Query(), "once_marker")!!
         assertThat(marker.getLong("createdAtMicros")).isEqualTo(123456L)
         assertThat(marker.getLong("expiresAtMicros")).isEqualTo(123457L)
         assertThat(marker).doesNotContainKey("_class")
@@ -259,15 +251,15 @@ class MongoOnceIntegrationTest {
     @Test
     fun `invalid finite retention is rejected before application work`() {
         val invalid = request("invalid").withRetentionPolicy(DurationIdempotencyRetentionPolicy(Duration.ofNanos(1)))
-        assertThatThrownBy { once.execute<Void?>(invalid) { error("must not run") } }
+        assertThatThrownBy { once.executeWithoutResult(invalid) { error("must not run") } }
             .isInstanceOf(IllegalArgumentException::class.java)
         assertThat(markers()).isZero()
     }
 
     @Test
     fun `cleanup respects the batch size and preserves unlimited retention`() {
-        repeat(5) { index -> once.execute(expiring("expired-$index")) { IdempotencyResult.executed() } }
-        once.execute(request("forever")) { IdempotencyResult.executed() }
+        repeat(5) { index -> once.executeWithoutResult(expiring("expired-$index")) { } }
+        once.executeWithoutResult(request("forever")) { }
         clock.advance(Duration.ofSeconds(1))
         assertThat(repository.cleanup(clock.instant(), 2)).isEqualTo(2)
         assertThat(repository.cleanup(clock.instant(), 2)).isEqualTo(2)
@@ -275,13 +267,13 @@ class MongoOnceIntegrationTest {
         assertThat(repository.cleanup(clock.instant(), 2)).isZero()
         assertThat(markers()).isEqualTo(1)
         assertThat(
-            once.execute<Void?>(request("forever")) { error("forever marker must skip") }.wasExecuted(),
+            once.executeWithoutResult(request("forever")) { error("forever marker must skip") }.wasExecuted(),
         ).isFalse()
     }
 
     @Test
     fun `cleanup commits independently of a surrounding MongoDB rollback`() {
-        once.execute(expiring("cleanup")) { IdempotencyResult.executed() }
+        once.executeWithoutResult(expiring("cleanup")) { }
         clock.advance(Duration.ofSeconds(1))
         TransactionTemplate(manager).executeWithoutResult { outer ->
             effect("outer")
@@ -294,7 +286,7 @@ class MongoOnceIntegrationTest {
 
     @Test
     fun `cleanup commit failure rolls back the complete selected batch`() {
-        repeat(2) { once.execute(expiring("cleanup-$it")) { IdempotencyResult.executed() } }
+        repeat(2) { once.executeWithoutResult(expiring("cleanup-$it")) { } }
         clock.advance(Duration.ofSeconds(1))
         val failing = FaultInjectingManager(factory, commitBeforeFailure = false)
         val cleanup = MongoIdempotencyMarkerRepository(mongo, failing, "once_marker")
@@ -306,25 +298,24 @@ class MongoOnceIntegrationTest {
     fun `lost commit acknowledgement never removes a durable marker`() {
         val uncertain = operations(repository, FaultInjectingManager(factory, commitBeforeFailure = true))
         assertThatThrownBy {
-            uncertain.execute(request("uncertain")) {
+            uncertain.executeWithoutResult(request("uncertain")) {
                 effect("uncertain")
-                IdempotencyResult.executed()
             }
         }.isInstanceOf(TransactionSystemException::class.java)
         assertThat(markers()).isEqualTo(1)
         assertThat(effects()).isEqualTo(1)
-        assertThat(once.execute<Void?>(request("uncertain")) { error("must not repeat") }.wasExecuted()).isFalse()
+        assertThat(once.executeWithoutResult(request("uncertain")) { error("must not repeat") }.wasExecuted()).isFalse()
     }
 
     @Test
     fun `another database factory cannot reserve or clean up this collection`() {
-        once.execute(expiring("protected")) { IdempotencyResult.executed() }
+        once.executeWithoutResult(expiring("protected")) { }
         clock.advance(Duration.ofSeconds(1))
         val otherFactory =
             SimpleMongoClientDatabaseFactory(client, "other_${UUID.randomUUID().toString().replace("-", "")}")
         val wrongManager = MongoTransactionManager(otherFactory)
         assertThatThrownBy {
-            operations(repository, wrongManager).execute<Void?>(request("wrong")) { error("must not run") }
+            operations(repository, wrongManager).executeWithoutResult(request("wrong")) { error("must not run") }
         }.isInstanceOf(IllegalStateException::class.java)
         val wrongCleanup = MongoIdempotencyMarkerRepository(mongo, wrongManager, "once_marker")
         assertThatThrownBy { wrongCleanup.cleanup(clock.instant(), 10) }.isInstanceOf(IllegalStateException::class.java)
@@ -341,9 +332,8 @@ class MongoOnceIntegrationTest {
     fun `unrelated business uniqueness conflicts propagate and roll back the marker`() {
         effect("existing")
         assertThatThrownBy {
-            once.execute(request("constraint")) {
+            once.executeWithoutResult(request("constraint")) {
                 effect("existing")
-                IdempotencyResult.executed()
             }
         }.isInstanceOf(DataAccessException::class.java)
         assertThat(markers()).isZero()
@@ -363,9 +353,8 @@ class MongoOnceIntegrationTest {
             assertThat(context).hasNotFailed()
             assertThat(context).hasSingleBean(MongoTransactionManager::class.java)
             assertThat(context).hasSingleBean(MongoIdempotencyMarkerRepository::class.java)
-            context.getBean(IdempotencyOperations::class.java).execute(request("configured")) {
+            context.getBean<IdempotencyOperations>().executeWithoutResult(request("configured")) {
                 effect("configured")
-                IdempotencyResult.executed()
             }
             assertThat(markers()).isEqualTo(1)
             assertThat(effects()).isEqualTo(1)
@@ -379,10 +368,10 @@ class MongoOnceIntegrationTest {
             .withPropertyValues("namastack.once.mongodb.collection-name=application_markers")
             .run { context ->
                 assertThat(context).hasNotFailed()
-                val configured = context.getBean(IdempotencyOperations::class.java)
-                configured.execute(request("custom-collection")) { IdempotencyResult.executed() }
+                val configured = context.getBean<IdempotencyOperations>()
+                configured.executeWithoutResult(request("custom-collection")) { }
                 assertThat(
-                    configured.execute<Void?>(request("custom-collection")) { error("must skip") }.wasExecuted(),
+                    configured.executeWithoutResult(request("custom-collection")) { error("must skip") }.wasExecuted(),
                 ).isFalse()
                 assertThat(mongo.count(Query(), "application_markers")).isEqualTo(1)
                 assertThat(markers()).isZero()
@@ -399,9 +388,7 @@ class MongoOnceIntegrationTest {
                 assertThat(context).hasNotFailed()
                 assertThat(context).hasSingleBean(JdbcIdempotencyMarkerRepository::class.java)
                 assertThat(context).doesNotHaveBean(MongoTransactionManager::class.java)
-                context.getBean(IdempotencyOperations::class.java).execute(request("sql-default")) {
-                    IdempotencyResult.executed()
-                }
+                context.getBean<IdempotencyOperations>().executeWithoutResult(request("sql-default")) { }
                 assertThat(countMarkerRows(dataSource, "once_marker")).isEqualTo(1)
                 assertThat(markers()).isZero()
             }
@@ -413,11 +400,10 @@ class MongoOnceIntegrationTest {
         val custom = MongoIdempotencyMarkerRepository(mongo, manager, "custom_markers")
         contextRunner().withBean(IdempotencyMarkerRepository::class.java, Supplier { custom }).run { context ->
             assertThat(context).hasNotFailed()
-            assertThat(context.getBean(IdempotencyMarkerRepository::class.java)).isSameAs(custom)
+            assertThat(context.getBean<IdempotencyMarkerRepository>()).isSameAs(custom)
             context
-                .getBean(
-                    IdempotencyOperations::class.java,
-                ).execute(request("custom")) { IdempotencyResult.executed() }
+                .getBean<IdempotencyOperations>()
+                .executeWithoutResult(request("custom")) { }
             assertThat(mongo.count(Query(), "custom_markers")).isEqualTo(1)
             assertThat(markers()).isZero()
         }
@@ -429,7 +415,7 @@ class MongoOnceIntegrationTest {
             .withBean(TransactionalMongoService::class.java, Supplier { TransactionalMongoService(mongo) })
             .run { context ->
                 assertThat(context).hasNotFailed()
-                assertThatThrownBy { context.getBean(TransactionalMongoService::class.java).writeThenFail() }
+                assertThatThrownBy { context.getBean<TransactionalMongoService>().writeThenFail() }
                     .isInstanceOf(IllegalStateException::class.java)
                     .hasMessage("service failure")
                 assertThat(effects()).isZero()
@@ -439,8 +425,8 @@ class MongoOnceIntegrationTest {
 
     @Test
     fun `the shared cleanup scheduler drains MongoDB batches and preserves retained markers`() {
-        repeat(5) { once.execute(expiring("scheduled-$it")) { IdempotencyResult.executed() } }
-        once.execute(request("retained")) { IdempotencyResult.executed() }
+        repeat(5) { once.executeWithoutResult(expiring("scheduled-$it")) { } }
+        once.executeWithoutResult(request("retained")) { }
         clock.advance(Duration.ofSeconds(1))
         contextRunner()
             .withConfiguration(
@@ -452,12 +438,12 @@ class MongoOnceIntegrationTest {
             ).withPropertyValues("namastack.once.cleanup.batch-size=2")
             .run { context ->
                 assertThat(context).hasNotFailed()
-                val scheduler = context.getBean(OnceCleanupScheduler::class.java)
+                val scheduler = context.getBean<OnceCleanupScheduler>()
                 assertThat(scheduler.isRunning).isTrue()
                 scheduler.cleanup()
                 assertThat(markers()).isEqualTo(1)
                 assertThat(
-                    once.execute<Void?>(request("retained")) { error("must remain protected") }.wasExecuted(),
+                    once.executeWithoutResult(request("retained")) { error("must remain protected") }.wasExecuted(),
                 ).isFalse()
             }
     }
@@ -471,7 +457,7 @@ class MongoOnceIntegrationTest {
     @Test
     fun `cleanup cannot delete a replacement marker selected in an older transaction snapshot`() {
         val identity = expiring("replacement")
-        once.execute(identity) { IdempotencyResult.executed() }
+        once.executeWithoutResult(identity) { }
         clock.advance(Duration.ofSeconds(1))
         val selected = CountDownLatch(1)
         val release = CountDownLatch(1)
@@ -486,14 +472,14 @@ class MongoOnceIntegrationTest {
             val pending = executor.submit<Int> { staleCleanup.cleanup(clock.instant(), 1) }
             check(selected.await(10, SECONDS))
             assertThat(repository.cleanup(clock.instant(), 1)).isEqualTo(1)
-            once.execute(request("replacement")) { IdempotencyResult.executed() }
+            once.executeWithoutResult(request("replacement")) { }
             release.countDown()
             assertThatThrownBy { pending.get(10, SECONDS) }
                 .isInstanceOf(ExecutionException::class.java)
                 .satisfies({ failure -> assertTransientConflict((failure as ExecutionException).cause!!) })
             assertThat(markers()).isEqualTo(1)
             assertThat(
-                once.execute<Void?>(identity) { error("replacement must remain protected") }.wasExecuted(),
+                once.executeWithoutResult(identity) { error("replacement must remain protected") }.wasExecuted(),
             ).isFalse()
         } finally {
             release.countDown()
@@ -508,20 +494,18 @@ class MongoOnceIntegrationTest {
         try {
             val winner =
                 executor.submit<IdempotencyResult<Void?>> {
-                    once.execute(request("concurrent")) {
+                    once.executeWithoutResult(request("concurrent")) {
                         effect("concurrent")
                         entered.countDown()
                         check(release.await(10, SECONDS))
                         if (rollbackWinner) error("winner rollback")
-                        IdempotencyResult.executed()
                     }
                 }
             check(entered.await(10, SECONDS))
             val contender =
                 executor.submit<IdempotencyResult<Void?>> {
-                    once.execute(request("concurrent")) {
+                    once.executeWithoutResult(request("concurrent")) {
                         effect("concurrent")
-                        IdempotencyResult.executed()
                     }
                 }
             var contentionFailure: ExecutionException? = null
@@ -549,15 +533,14 @@ class MongoOnceIntegrationTest {
                 }
             }
             if (rollbackWinner && contentionFailure != null) {
-                once.execute(request("concurrent")) {
+                once.executeWithoutResult(request("concurrent")) {
                     effect("concurrent")
-                    IdempotencyResult.executed()
                 }
             }
             assertThat(markers()).isEqualTo(1)
             assertThat(effects()).isEqualTo(1)
             assertThat(
-                once.execute<Void?>(request("concurrent")) { error("must skip committed marker") }.wasExecuted(),
+                once.executeWithoutResult(request("concurrent")) { error("must skip committed marker") }.wasExecuted(),
             ).isFalse()
         } finally {
             release.countDown()

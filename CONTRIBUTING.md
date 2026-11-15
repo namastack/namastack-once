@@ -187,11 +187,12 @@ its parent type, normally as nested types, following Namastack Outbox's conventi
  *
  * @param T Type of the newly computed business value.
  * @param request Stable scope/key identity and retention policy.
- * @param action Synchronous work returning a fresh Executed result.
+ * @param action Synchronous work returning the business value, which may be null.
  * @return A flat Executed or Duplicate; never a stored response replay.
  * @since 0.1.0
  */
-fun <T> execute(request: IdempotencyRequest, action: Supplier<IdempotencyResult<T>>): IdempotencyResult<T>
+fun <T> execute(request: IdempotencyRequest, action: Supplier<T>): IdempotencyResult<T>
+fun executeWithoutResult(request: IdempotencyRequest, action: Runnable): IdempotencyResult<Void?>
 ```
 
 ## Testing Guidelines

@@ -4,6 +4,8 @@ import io.namastack.once.retention.DurationIdempotencyRetentionPolicy
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.NoUniqueBeanDefinitionException
+import org.springframework.beans.factory.getBean
+import org.springframework.beans.factory.getBeansOfType
 import org.springframework.jdbc.support.JdbcTransactionManager
 import java.time.Duration
 import java.util.function.Supplier
@@ -17,18 +19,18 @@ class MultipleOnceBeansIntegrationTest {
         runner.withUserConfiguration(TwoOnceInstances::class.java).withBean(NamedHandlers::class.java).run { context ->
             assertThat(context).hasNotFailed()
             assertThat(context).doesNotHaveBean("once")
-            assertThat(context.getBeansOfType(IdempotencyOperations::class.java)).hasSize(2)
-            val handlers = context.getBean(NamedHandlers::class.java)
+            assertThat(context.getBeansOfType<IdempotencyOperations>()).hasSize(2)
+            val handlers = context.getBean<NamedHandlers>()
             repeat(2) {
                 handlers.order("same-key")
                 handlers.invoice("same-key")
                 handlers.defaultOrder("default")
             }
             assertThat(
-                countMarkerRows(context.getBean("ordersDataSource", DataSource::class.java), "orders_once"),
+                countMarkerRows(context.getBean<DataSource>("ordersDataSource"), "orders_once"),
             ).isEqualTo(2)
             assertThat(
-                countMarkerRows(context.getBean("billingDataSource", DataSource::class.java), "billing_once"),
+                countMarkerRows(context.getBean<DataSource>("billingDataSource"), "billing_once"),
             ).isEqualTo(1)
         }
     }
@@ -45,17 +47,17 @@ class MultipleOnceBeansIntegrationTest {
                         .of("expire", "key")
                         .withRetentionPolicy(DurationIdempotencyRetentionPolicy(Duration.ofSeconds(1)))
                 listOf("ordersOnce", "billingOnce").forEach { name ->
-                    val once = context.getBean(name, IdempotencyOperations::class.java)
-                    repeat(3) { index -> once.execute(request.copy(key = index)) { IdempotencyResult.executed() } }
-                    once.execute(IdempotencyRequest.of("keep", "forever")) { IdempotencyResult.executed() }
+                    val once = context.getBean<IdempotencyOperations>(name)
+                    repeat(3) { index -> once.executeWithoutResult(request.copy(key = index)) { } }
+                    once.executeWithoutResult(IdempotencyRequest.of("keep", "forever")) { }
                 }
-                context.getBean(MutableOnceClock::class.java).advance(Duration.ofSeconds(1))
-                context.getBean(OnceCleanupScheduler::class.java).cleanup()
+                context.getBean<MutableOnceClock>().advance(Duration.ofSeconds(1))
+                context.getBean<OnceCleanupScheduler>().cleanup()
                 assertThat(
-                    countMarkerRows(context.getBean("ordersDataSource", DataSource::class.java), "orders_once"),
+                    countMarkerRows(context.getBean<DataSource>("ordersDataSource"), "orders_once"),
                 ).isEqualTo(1)
                 assertThat(
-                    countMarkerRows(context.getBean("billingDataSource", DataSource::class.java), "billing_once"),
+                    countMarkerRows(context.getBean<DataSource>("billingDataSource"), "billing_once"),
                 ).isEqualTo(1)
             }
     }
@@ -73,7 +75,7 @@ class MultipleOnceBeansIntegrationTest {
 
         multipleInstances.withBean(ExplicitInstanceHandler::class.java).run { context ->
             assertThat(context).hasNotFailed()
-            repeat(2) { context.getBean(ExplicitInstanceHandler::class.java).process("explicit") }
+            repeat(2) { context.getBean<ExplicitInstanceHandler>().process("explicit") }
         }
         multipleInstances.withBean(DefaultInstanceHandler::class.java).run { context ->
             assertThat(context).hasFailed()

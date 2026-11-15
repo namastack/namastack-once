@@ -17,8 +17,8 @@ sealed interface IdempotencyResult<T> {
     /**
      * Reports whether this outcome is [Executed].
      *
-     * Results returned by Once follow transaction completion. Constructing this wrapper inside
-     * the callback does not itself commit the transaction.
+     * Results returned by Once follow transaction completion. Constructing this wrapper in an
+     * annotated method does not itself commit the transaction.
      *
      * @return True for [Executed], false for [Duplicate].
      */
@@ -112,8 +112,9 @@ sealed interface IdempotencyResult<T> {
         /**
          * Wraps the value produced by the current application action.
          *
-         * The execution service validates this wrapper before transaction completion. Creating it
-         * does not reserve an identity or certify a database commit by itself.
+         * Annotated methods return this wrapper; the annotation adapter validates it before commit.
+         * Programmatic callbacks return the business value directly. Creating this wrapper does
+         * not reserve an identity or certify a database commit by itself.
          *
          * @param T Type of the newly computed business value.
          * @param value Newly computed business value, which may be null.
@@ -123,11 +124,11 @@ sealed interface IdempotencyResult<T> {
         fun <T> executed(value: T): Executed<T> = Executed(value)
 
         /**
-         * Completes an application callback that has no business value to return.
+         * Completes an annotated method that has no business value to return.
          *
-         * Java callers can return this wrapper from an `IdempotencyResult<Void>` callback without
+         * Java callers can return this wrapper from an `IdempotencyResult<Void>` method without
          * supplying an explicit null argument. The wrapper does not commit the transaction; Once
-         * commits after the application action returns.
+         * commits after the annotated method returns.
          *
          * @return An executed outcome with a null Void value.
          */

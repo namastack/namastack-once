@@ -29,9 +29,9 @@ interface OnceConcurrencyContract : OnceDatabaseTestSupport {
         cleanupBeforeRedelivery: Boolean = false,
     ) {
         if (cleanupBeforeRedelivery) {
-            once.execute<Void?>(
+            once.executeWithoutResult(
                 request("concurrent").withRetentionPolicy(DurationIdempotencyRetentionPolicy(Duration.ofSeconds(1))),
-            ) { IdempotencyResult.executed() }
+            ) { }
             clock.advance(Duration.ofSeconds(1))
             val markerStore = markerRepository
             assertThat(markerStore.cleanup(clock.instant(), 100)).isEqualTo(1)
@@ -43,21 +43,19 @@ interface OnceConcurrencyContract : OnceDatabaseTestSupport {
         try {
             val first =
                 executor.submit<IdempotencyResult<Void?>> {
-                    once.execute<Void?>(request("concurrent")) {
+                    once.executeWithoutResult(request("concurrent")) {
                         effect("concurrent")
                         entered.countDown()
                         check(release.await(10, SECONDS))
                         if (rollbackFirst) error("first rolled back")
-                        IdempotencyResult.executed()
                     }
                 }
             check(entered.await(10, SECONDS))
             val second =
                 executor.submit<IdempotencyResult<Void?>> {
                     secondStarted.countDown()
-                    once.execute<Void?>(request("concurrent")) {
+                    once.executeWithoutResult(request("concurrent")) {
                         effect("concurrent")
-                        IdempotencyResult.executed()
                     }
                 }
             check(secondStarted.await(10, SECONDS))

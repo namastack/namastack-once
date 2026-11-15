@@ -6,6 +6,7 @@ import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test
 import org.springframework.dao.DataAccessException
 import org.springframework.jdbc.core.JdbcTemplate
+import org.springframework.jdbc.core.queryForObject
 import org.springframework.jdbc.datasource.DriverManagerDataSource
 import org.springframework.jdbc.datasource.TransactionAwareDataSourceProxy
 import org.springframework.jdbc.support.JdbcTransactionManager
@@ -33,7 +34,7 @@ class H2OnceIntegrationTest : AbstractOnceIntegrationTest() {
             request("proxied").withRetentionPolicy(DurationIdempotencyRetentionPolicy(Duration.ofSeconds(1)))
 
         assertThatThrownBy {
-            proxyOnce.execute<Void?>(identity) {
+            proxyOnce.executeWithoutResult(identity) {
                 effect("proxied")
                 error("proxy action failure")
             }
@@ -42,18 +43,17 @@ class H2OnceIntegrationTest : AbstractOnceIntegrationTest() {
         assertThat(markers()).isZero()
         assertThat(effects()).isZero()
 
-        proxyOnce.execute(identity) {
+        proxyOnce.executeWithoutResult(identity) {
             effect("proxied")
-            IdempotencyResult.executed()
         }
-        assertThat(proxyOnce.execute<Void?>(identity) { error("duplicate must skip") }.wasExecuted()).isFalse()
+        assertThat(proxyOnce.executeWithoutResult(identity) { error("duplicate must skip") }.wasExecuted()).isFalse()
         assertThat(markers()).isEqualTo(1)
         assertThat(effects()).isEqualTo(1)
 
         clock.advance(Duration.ofSeconds(1))
         TransactionTemplate(proxyManager).executeWithoutResult { outer ->
             // Bind a proxy connection before cleanup starts its independent transaction.
-            assertThat(JdbcTemplate(proxy).queryForObject("SELECT COUNT(*) FROM once_marker", Int::class.java))
+            assertThat(JdbcTemplate(proxy).queryForObject<Int>("SELECT COUNT(*) FROM once_marker"))
                 .isEqualTo(1)
             assertThat(repository.cleanup(clock.instant(), 10)).isEqualTo(1)
             outer.setRollbackOnly()
@@ -70,15 +70,14 @@ class H2OnceIntegrationTest : AbstractOnceIntegrationTest() {
         try {
             val first =
                 executor.submit<IdempotencyResult<Void?>> {
-                    once.execute(request("locked")) {
+                    once.executeWithoutResult(request("locked")) {
                         entered.countDown()
                         check(release.await(10, TimeUnit.SECONDS))
-                        IdempotencyResult.executed()
                     }
                 }
             check(entered.await(10, TimeUnit.SECONDS))
             assertThatThrownBy {
-                once.execute<Void?>(request("locked")) { error("timed-out action must not run") }
+                once.executeWithoutResult(request("locked")) { error("timed-out action must not run") }
             }.isInstanceOf(DataAccessException::class.java)
             release.countDown()
             assertThat(first.get(10, TimeUnit.SECONDS).wasExecuted())

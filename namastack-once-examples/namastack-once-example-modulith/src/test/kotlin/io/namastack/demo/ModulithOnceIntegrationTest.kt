@@ -12,6 +12,8 @@ import org.springframework.context.ApplicationEventPublisher
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Import
 import org.springframework.jdbc.core.JdbcTemplate
+import org.springframework.jdbc.core.queryForList
+import org.springframework.jdbc.core.queryForObject
 import org.springframework.jdbc.support.JdbcTransactionManager
 import org.springframework.modulith.events.CompletedEventPublications
 import org.springframework.modulith.events.IncompleteEventPublications
@@ -104,11 +106,7 @@ class ModulithOnceIntegrationTest {
         assertThat(markerCount(event)).isZero()
         assertThat(publicationStatuses(event)).containsExactly("FAILED")
         assertThat(
-            jdbc.queryForObject(
-                "SELECT COUNT(*) FROM demo_order WHERE id = ?",
-                Int::class.java,
-                event.orderId.toString(),
-            ),
+            jdbc.queryForObject<Int>("SELECT COUNT(*) FROM demo_order WHERE id = ?", event.orderId.toString()),
         ).isEqualTo(1)
     }
 
@@ -161,33 +159,26 @@ class ModulithOnceIntegrationTest {
     }
 
     private fun awaitListenerCompletion() {
-        // The single worker processes this barrier after all previously submitted listener invocations.
         executor.submit {}.get(10, SECONDS)
     }
 
     private fun invoiceCount(event: OrderPlaced): Int =
         checkNotNull(
-            jdbc.queryForObject(
-                "SELECT COUNT(*) FROM demo_invoice WHERE event_id = ?",
-                Int::class.java,
-                event.eventId.toString(),
-            ),
+            jdbc.queryForObject<Int>("SELECT COUNT(*) FROM demo_invoice WHERE event_id = ?", event.eventId.toString()),
         )
 
     private fun markerCount(event: OrderPlaced): Int =
         checkNotNull(
-            jdbc.queryForObject(
+            jdbc.queryForObject<Int>(
                 "SELECT COUNT(*) FROM once_marker WHERE idempotency_hash = ?",
-                Int::class.java,
                 IdempotencyKeyHasher().hash("billing.issue-invoice", event.eventId.toString()),
             ),
         )
 
     private fun publicationStatuses(event: OrderPlaced): List<String> =
         jdbc
-            .queryForList(
+            .queryForList<String>(
                 "SELECT STATUS FROM event_publication WHERE serialized_event LIKE ?",
-                String::class.java,
                 "%${event.eventId}%",
             ).map { checkNotNull(it) }
 
@@ -206,12 +197,6 @@ class ModulithOnceIntegrationTest {
             }
     }
 
-    /**
-     * Records real transaction starts and injects faults only at Once's unnamed commit boundary.
-     *
-     * BEFORE_COMMIT rolls back the connection to simulate a failed commit with no durable effects.
-     * AFTER_COMMIT commits normally and then simulates an acknowledgement lost before Modulith sees success.
-     */
     class RecordingTransactionManager(
         dataSource: DataSource,
     ) : JdbcTransactionManager(dataSource) {

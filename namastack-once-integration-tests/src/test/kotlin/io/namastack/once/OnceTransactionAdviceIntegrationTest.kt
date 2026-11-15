@@ -3,6 +3,7 @@ package io.namastack.once
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test
+import org.springframework.beans.factory.getBean
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
 import org.springframework.context.annotation.Primary
@@ -38,9 +39,9 @@ class OnceTransactionAdviceIntegrationTest {
         listOf(EarlyTransactionConfiguration::class.java, LateTransactionConfiguration::class.java).forEach { config ->
             runner.withUserConfiguration(config).withBean(NonTransactionalOrderHandler::class.java).run { context ->
                 assertThat(context).hasNotFailed()
-                val handler = context.getBean(NonTransactionalOrderHandler::class.java)
-                val transaction = TransactionTemplate(context.getBean(PlatformTransactionManager::class.java))
-                val jdbc = context.getBean(JdbcTemplate::class.java)
+                val handler = context.getBean<NonTransactionalOrderHandler>()
+                val transaction = TransactionTemplate(context.getBean<PlatformTransactionManager>())
+                val jdbc = context.getBean<JdbcTemplate>()
                 transaction.executeWithoutResult { status ->
                     jdbc.update("INSERT INTO business_effect (id, amount) VALUES ('outer', 1)")
                     handler.handle("owned")
@@ -64,9 +65,9 @@ class OnceTransactionAdviceIntegrationTest {
             .withBean(NonTransactionalOrderHandler::class.java)
             .run { context ->
                 assertThat(context).hasNotFailed()
-                val handler = context.getBean(NonTransactionalOrderHandler::class.java)
-                val transaction = TransactionTemplate(context.getBean(PlatformTransactionManager::class.java))
-                val jdbc = context.getBean(JdbcTemplate::class.java)
+                val handler = context.getBean<NonTransactionalOrderHandler>()
+                val transaction = TransactionTemplate(context.getBean<PlatformTransactionManager>())
+                val jdbc = context.getBean<JdbcTemplate>()
                 listOf(false, true).forEach { rollback ->
                     val failures = mutableListOf<Throwable>()
                     transaction.executeWithoutResult { status ->
@@ -106,9 +107,9 @@ class OnceTransactionAdviceIntegrationTest {
             .withBean(TransactionalOrderHandler::class.java)
             .run { context ->
                 assertThat(context).hasNotFailed()
-                val handler = context.getBean(TransactionalOrderHandler::class.java)
-                val jdbc = context.getBean(JdbcTemplate::class.java)
-                val transaction = TransactionTemplate(context.getBean(PlatformTransactionManager::class.java))
+                val handler = context.getBean<TransactionalOrderHandler>()
+                val jdbc = context.getBean<JdbcTemplate>()
+                val transaction = TransactionTemplate(context.getBean<PlatformTransactionManager>())
                 transaction.executeWithoutResult { status ->
                     jdbc.update("INSERT INTO business_effect (id, amount) VALUES ('outer', 1)")
                     handler.process("custom-metadata")

@@ -23,15 +23,15 @@ class MultipleDataSourcesIntegrationTest {
         val billingOnce = createTestOnce(second, JdbcTransactionManager(second), "billing_once")
         val request = IdempotencyRequest.of("process", "same-key")
 
-        assertThat(ordersOnce.execute(request) { IdempotencyResult.executed() }.wasExecuted()).isTrue()
-        assertThat(billingOnce.execute(request) { IdempotencyResult.executed() }.wasExecuted()).isTrue()
-        assertThat(ordersOnce.execute<Void?>(request) { error("duplicate") }.wasExecuted()).isFalse()
-        assertThat(billingOnce.execute<Void?>(request) { error("duplicate") }.wasExecuted()).isFalse()
+        assertThat(ordersOnce.executeWithoutResult(request) { }.wasExecuted()).isTrue()
+        assertThat(billingOnce.executeWithoutResult(request) { }.wasExecuted()).isTrue()
+        assertThat(ordersOnce.executeWithoutResult(request) { error("duplicate") }.wasExecuted()).isFalse()
+        assertThat(billingOnce.executeWithoutResult(request) { error("duplicate") }.wasExecuted()).isFalse()
         assertThat(countMarkerRows(first, "orders_once")).isEqualTo(1)
         assertThat(countMarkerRows(second, "billing_once")).isEqualTo(1)
         assertThatThrownBy {
             TransactionTemplate(firstManager).executeWithoutResult {
-                billingOnce.execute<Void?>(request) { error("wrong datasource") }
+                billingOnce.executeWithoutResult(request) { error("wrong datasource") }
             }
         }.isInstanceOf(IllegalStateException::class.java)
     }
@@ -56,9 +56,8 @@ class MultipleDataSourcesIntegrationTest {
         var actionExecuted = false
 
         assertThatThrownBy {
-            once.execute(IdempotencyRequest.of("process", "misconfigured")) {
+            once.executeWithoutResult(IdempotencyRequest.of("process", "misconfigured")) {
                 actionExecuted = true
-                IdempotencyResult.executed()
             }
         }.isInstanceOf(IllegalStateException::class.java)
         assertThat(actionExecuted).isFalse()
@@ -82,7 +81,7 @@ class MultipleDataSourcesIntegrationTest {
             IdempotencyRequest
                 .of("process", "expire")
                 .withRetentionPolicy(DurationIdempotencyRetentionPolicy(Duration.ofSeconds(1)))
-        once.execute(request) { IdempotencyResult.executed() }
+        once.executeWithoutResult(request) { }
         val repository =
             createTestRepository(
                 markerDataSource,
@@ -104,8 +103,8 @@ class MultipleDataSourcesIntegrationTest {
         val billingOnce = createTestOnce(dataSource, manager, "billing_once")
         val request = IdempotencyRequest.of("process", "same-key")
 
-        assertThat(ordersOnce.execute(request) { IdempotencyResult.executed() }.wasExecuted()).isTrue()
-        assertThat(billingOnce.execute(request) { IdempotencyResult.executed() }.wasExecuted()).isTrue()
+        assertThat(ordersOnce.executeWithoutResult(request) { }.wasExecuted()).isTrue()
+        assertThat(billingOnce.executeWithoutResult(request) { }.wasExecuted()).isTrue()
 
         assertThat(countMarkerRows(dataSource, "orders_once")).isEqualTo(1)
         assertThat(countMarkerRows(dataSource, "billing_once")).isEqualTo(1)

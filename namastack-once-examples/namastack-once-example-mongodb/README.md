@@ -28,3 +28,8 @@ operations. This example stores marker timestamps as BSON Int64 epoch microsecon
 dates. Keep the supplied representation and expiry index; cleanup is handled by Once rather than a
 MongoDB TTL index. Production deployments require a transaction-capable replica set or sharded
 cluster. MongoDB write conflicts remain technical failures for the caller to retry.
+
+`DemoApplication` uses constructor injection and `CommandLineRunner` to submit the same command
+twice. `ProgrammaticOrderHandler` injects `IdempotencyOperations` and the application input port;
+its callback returns the order directly. `IdempotentOrderHandler` shows the annotation alternative.
+The `main` function only starts Spring Boot.
