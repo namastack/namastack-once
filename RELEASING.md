@@ -11,6 +11,8 @@ It tests release tooling, updates the root version and shared example catalog, a
 repository as part of each release.
 Review and merge after Gradle and example smoke-test workflows pass. The initial 0.1.0 version is
 already set, so its first publication does not require a version-only preparation pull request.
+If the requested version is already prepared on main, **Prepare Release** succeeds without creating
+a branch or pull request and directs you to **Publish Release** for stable publication.
 
 ## Publish
 

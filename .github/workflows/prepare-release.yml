@@ -43,15 +43,20 @@ jobs:
         run: node scripts/prepare-release.mjs "$RELEASE_VERSION"
 
       - name: Validate generated changes
+        id: changes
         run: |
           test "$(scripts/current-version.sh)" = "$RELEASE_VERSION"
           git diff --check
           if git diff --exit-code --quiet; then
-            echo "Release preparation did not change any files" >&2
-            exit 1
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "Version $RELEASE_VERSION is already prepared on main. No release pull request is needed." >> "$GITHUB_STEP_SUMMARY"
+            echo "Run Publish Release with version $RELEASE_VERSION to publish a stable release." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Create release branch and commit
+        if: steps.changes.outputs.changed == 'true'
         id: release-branch
         run: |
           branch="release/$RELEASE_VERSION"
@@ -77,6 +82,7 @@ jobs:
           echo "branch=$branch" >> "$GITHUB_OUTPUT"
 
       - name: Open release pull request
+        if: steps.changes.outputs.changed == 'true'
         env:
           RELEASE_BRANCH: ${{ steps.release-branch.outputs.branch }}
         run: |
@@ -110,6 +116,7 @@ jobs:
           fi
 
       - name: Start release validation workflows
+        if: steps.changes.outputs.changed == 'true'
         env:
           RELEASE_BRANCH: ${{ steps.release-branch.outputs.branch }}
         run: |
