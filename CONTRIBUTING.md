@@ -189,7 +189,7 @@ its parent type, normally as nested types, following Namastack Outbox's conventi
  * @param request Stable scope/key identity and retention policy.
  * @param action Synchronous work returning the business value, which may be null.
  * @return A flat Executed or Duplicate; never a stored response replay.
- * @since 0.1.0
+ * @since <version introduced>
  */
 fun <T> execute(request: IdempotencyRequest, action: Supplier<T>): IdempotencyResult<T>
 fun executeWithoutResult(request: IdempotencyRequest, action: Runnable): IdempotencyResult<Void?>
@@ -227,8 +227,12 @@ For PostgreSQL/MySQL/MariaDB/Oracle/SQL Server contract tests, run:
 ```
 
 This command requires Docker and must not silently skip a missing daemon. Public and infrastructure
-classes have accurate KDocs with `@since 0.1.0`; file organization follows the production/test rules above.
-Never add automatic schema creation; application migrations own DDL.
+classes have accurate KDocs with `@since` matching the version that introduced each API.
+File organization follows the production/test rules above.
+
+JDBC schema initialization creates the default marker table and expiry index at startup and must be safe
+to run repeatedly. Existing tables are not migrated. Disable automatic initialization when using custom
+schema or table names, table prefixes, or application-managed migrations.
 
 ### Test Requirements
 

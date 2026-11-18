@@ -2,6 +2,7 @@ package io.namastack.once
 
 import io.namastack.once.annotation.Idempotent
 import io.namastack.once.config.JdbcOnceAutoConfiguration
+import io.namastack.once.config.JdbcOnceSchemaAutoConfiguration
 import io.namastack.once.config.OnceCoreAnnotationAutoConfiguration
 import io.namastack.once.config.OnceCoreInfrastructureAutoConfiguration
 import io.namastack.once.config.OnceCoreSchedulingAutoConfiguration
@@ -13,10 +14,12 @@ import org.springframework.boot.test.context.runner.ApplicationContextRunner
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
 import org.springframework.context.annotation.Primary
+import org.springframework.core.io.ByteArrayResource
 import org.springframework.core.io.ClassPathResource
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.jdbc.core.queryForObject
 import org.springframework.jdbc.datasource.DriverManagerDataSource
+import org.springframework.jdbc.datasource.init.ResourceDatabasePopulator
 import org.springframework.jdbc.support.JdbcTransactionManager
 import org.springframework.transaction.PlatformTransactionManager
 import org.springframework.transaction.annotation.Transactional
@@ -25,16 +28,18 @@ import java.util.UUID
 import javax.sql.DataSource
 
 fun multipleOnceTestApplicationContext(): ApplicationContextRunner =
-    ApplicationContextRunner().withConfiguration(
-        AutoConfigurations.of(
-            OnceCoreInfrastructureAutoConfiguration::class.java,
-            JdbcOnceAutoConfiguration::class.java,
-            OnceCoreAnnotationAutoConfiguration::class.java,
-            TaskSchedulingAutoConfiguration::class.java,
-            OnceCoreThreadingAutoConfiguration::class.java,
-            OnceCoreSchedulingAutoConfiguration::class.java,
-        ),
-    )
+    ApplicationContextRunner()
+        .withConfiguration(
+            AutoConfigurations.of(
+                OnceCoreInfrastructureAutoConfiguration::class.java,
+                JdbcOnceAutoConfiguration::class.java,
+                JdbcOnceSchemaAutoConfiguration::class.java,
+                OnceCoreAnnotationAutoConfiguration::class.java,
+                TaskSchedulingAutoConfiguration::class.java,
+                OnceCoreThreadingAutoConfiguration::class.java,
+                OnceCoreSchedulingAutoConfiguration::class.java,
+            ),
+        ).withPropertyValues("namastack.once.jdbc.schema-initialization.enabled=false")
 
 fun countMarkerRows(
     dataSource: DataSource,
@@ -62,10 +67,9 @@ fun createTestMarkerTable(
     dataSource: DataSource,
     tableName: String,
 ) {
-    val schema = ClassPathResource("schema/h2.sql").inputStream.bufferedReader().use { it.readText() }
-    schema.replace("once_marker", tableName).split(';').filter(String::isNotBlank).forEach {
-        JdbcTemplate(dataSource).execute(it)
-    }
+    val schema = ClassPathResource("schema/h2/once-tables.sql").inputStream.bufferedReader().use { it.readText() }
+    val customSchema = ByteArrayResource(schema.replace("once_marker", tableName).toByteArray(Charsets.UTF_8))
+    ResourceDatabasePopulator(customSchema).execute(dataSource)
 }
 
 @Configuration(proxyBeanMethods = false)

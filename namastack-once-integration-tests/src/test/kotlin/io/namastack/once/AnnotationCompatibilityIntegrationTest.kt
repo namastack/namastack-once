@@ -14,12 +14,10 @@ import org.springframework.beans.factory.support.AutowireCandidateQualifier
 import org.springframework.beans.factory.support.DefaultListableBeanFactory
 import org.springframework.beans.factory.support.RootBeanDefinition
 import org.springframework.core.annotation.AliasFor
-import org.springframework.core.io.ClassPathResource
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.jdbc.core.queryForList
 import org.springframework.jdbc.core.queryForObject
 import org.springframework.jdbc.datasource.DriverManagerDataSource
-import org.springframework.jdbc.datasource.init.ResourceDatabasePopulator
 import org.springframework.jdbc.support.JdbcTransactionManager
 import org.springframework.transaction.PlatformTransactionManager
 import org.springframework.transaction.annotation.AnnotationTransactionAttributeSource
@@ -33,7 +31,7 @@ import java.util.UUID
 class AnnotationCompatibilityIntegrationTest {
     private val dataSource =
         DriverManagerDataSource("jdbc:h2:mem:annotations_${UUID.randomUUID()};DB_CLOSE_DELAY=-1", "sa", "").also {
-            ResourceDatabasePopulator(ClassPathResource("schema/h2.sql")).execute(it)
+            initializeTestMarkerSchema(it)
             JdbcTemplate(it).execute("CREATE TABLE business_effect (id VARCHAR(100) PRIMARY KEY)")
         }
     private val jdbc = JdbcTemplate(dataSource)

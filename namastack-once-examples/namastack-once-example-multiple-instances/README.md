@@ -14,7 +14,8 @@ instance is used by an unqualified `@Idempotent`; `operationsBean = "billingOnce
 Programmatic callers select their instance through constructor injection with `@Qualifier`.
 
 The application owns `schema.sql` and enables Spring SQL initialization. `@DependsOnDatabaseInitialization`
-ensures repository construction runs after that schema exists. Once itself never creates tables.
+ensures repository construction runs after that schema exists. Automatic Once schema initialization is
+disabled because this example uses custom `orders_once` and `billing_once` tables.
 Both instances participate in the shared Core cleanup scheduler.
 
 ```bash

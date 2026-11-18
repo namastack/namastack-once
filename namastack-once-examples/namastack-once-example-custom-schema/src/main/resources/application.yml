@@ -1,0 +1,20 @@
+spring:
+  main:
+    web-application-type: none
+  datasource:
+    url: jdbc:h2:mem:once-custom-schema;DB_CLOSE_DELAY=-1
+    username: sa
+    password: ""
+  sql:
+    init:
+      mode: always
+      schema-locations: classpath:db/schema.sql
+namastack:
+  once:
+    jdbc:
+      schema-name: idempotency
+      table-name: processed_event
+      schema-initialization:
+        enabled: false
+    cleanup:
+      enabled: false

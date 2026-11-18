@@ -22,7 +22,7 @@ class JdbcRepositoryConstructionTest {
         val dataSource = mockk<DataSource> { every { getConnection() } returns connection }
         val repository =
             JdbcIdempotencyMarkerRepository(dataSource, DataSourceTransactionManager(dataSource)) {
-                JdbcOnceMarkerQueriesFactory.create(JdbcDatabaseType.detect(dataSource), "once_marker")
+                JdbcOnceMarkerQueriesFactory.create(JdbcDatabaseType.from(dataSource), "once_marker")
             }
         verify(exactly = 0) { dataSource.connection }
 

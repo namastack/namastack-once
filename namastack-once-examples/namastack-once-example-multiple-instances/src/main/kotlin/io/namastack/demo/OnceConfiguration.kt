@@ -26,7 +26,7 @@ class OnceConfiguration {
         clock: Clock,
     ): IdempotencyOperations {
         val repository = JdbcIdempotencyMarkerRepository(dataSource, transactionManager) {
-            JdbcOnceMarkerQueriesFactory.create(JdbcDatabaseType.detect(dataSource), "orders_once")
+            JdbcOnceMarkerQueriesFactory.create(JdbcDatabaseType.from(dataSource), "orders_once")
         }
         return DefaultIdempotencyOperations(transactionManager, repository, keyNormalizer, clock)
     }
@@ -40,7 +40,7 @@ class OnceConfiguration {
         clock: Clock,
     ): IdempotencyOperations {
         val repository = JdbcIdempotencyMarkerRepository(dataSource, transactionManager) {
-            JdbcOnceMarkerQueriesFactory.create(JdbcDatabaseType.detect(dataSource), "billing_once")
+            JdbcOnceMarkerQueriesFactory.create(JdbcDatabaseType.from(dataSource), "billing_once")
         }
         return DefaultIdempotencyOperations(transactionManager, repository, keyNormalizer, clock)
     }

@@ -60,6 +60,7 @@ jobs:
         example:
           - namastack-once-example-java
           - namastack-once-example-kotlin
+          - namastack-once-example-custom-schema
           - namastack-once-example-modulith
           - namastack-once-example-outbox-tracing
           - namastack-once-example-mongodb

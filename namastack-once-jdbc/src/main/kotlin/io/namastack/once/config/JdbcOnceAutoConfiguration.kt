@@ -1,10 +1,12 @@
 package io.namastack.once.config
 
 import io.namastack.once.DefaultIdempotencyOperations
+import io.namastack.once.DefaultJdbcTableNameResolver
 import io.namastack.once.IdempotencyKeyNormalizer
 import io.namastack.once.IdempotencyMarkerRepository
 import io.namastack.once.IdempotencyOperations
 import io.namastack.once.JdbcIdempotencyMarkerRepository
+import io.namastack.once.JdbcTableNameResolver
 import io.namastack.once.instrumentation.OnceInstrumentation
 import io.namastack.once.query.JdbcOnceMarkerQueriesFactory
 import org.springframework.beans.factory.ObjectProvider
@@ -24,7 +26,7 @@ import java.time.Clock
 import javax.sql.DataSource
 
 /**
- * Creates the default fixed JDBC Once instance after application-managed schema initialization.
+ * Creates the default fixed JDBC Once instance after database schema initialization.
  *
  * Applications defining their own Once beans replace the default instance. Additional instances
  * supply the repository SQL through a lazy query supplier. This configuration owns datasource,
@@ -46,8 +48,20 @@ import javax.sql.DataSource
 @ConditionalOnBean(DataSource::class)
 @ConditionalOnProperty(name = ["namastack.once.enabled"], havingValue = "true", matchIfMissing = true)
 @ConditionalOnMissingBean(IdempotencyOperations::class)
-@EnableConfigurationProperties(OnceProperties::class, OnceJdbcProperties::class)
+@EnableConfigurationProperties(OnceProperties::class, JdbcOnceConfigurationProperties::class)
 class JdbcOnceAutoConfiguration {
+    /**
+     * Creates the table name resolver for JDBC operations.
+     *
+     * @param properties Configuration properties for table prefix and schema
+     * @return Table name resolver for constructing fully qualified table names
+     * @since 0.2.0
+     */
+    @Bean
+    @ConditionalOnMissingBean
+    internal fun jdbcTableNameResolver(properties: JdbcOnceConfigurationProperties): JdbcTableNameResolver =
+        DefaultJdbcTableNameResolver(properties)
+
     /**
      * Creates default JDBC persistence with lazily detected database-specific statements.
      *
@@ -55,7 +69,7 @@ class JdbcOnceAutoConfiguration {
      * @param beanFactory Resolves the configured or unambiguous transaction manager.
      * @param dataSource Datasource shared with business writes.
      * @param properties Transaction-manager selection for the default instance.
-     * @param jdbc Trusted marker-table and schema names from application configuration.
+     * @param tableNameResolver Resolver for fully qualified table names.
      * @return The repository used when the application has not supplied its own.
      */
     @Bean
@@ -66,19 +80,16 @@ class JdbcOnceAutoConfiguration {
         beanFactory: ConfigurableListableBeanFactory,
         dataSource: DataSource,
         properties: OnceProperties,
-        jdbc: OnceJdbcProperties,
-    ): IdempotencyMarkerRepository {
-        val tableName = jdbc.schemaName?.let { "$it.${jdbc.tableName}" } ?: jdbc.tableName
-
-        return JdbcIdempotencyMarkerRepository(
+        tableNameResolver: JdbcTableNameResolver,
+    ): IdempotencyMarkerRepository =
+        JdbcIdempotencyMarkerRepository(
             instrumentation = OnceInstrumentation.compose(instrumentations.orderedStream().toList()),
             dataSource = dataSource,
             transactionManager = transactionManager(beanFactory, properties),
             queries = {
-                JdbcOnceMarkerQueriesFactory.create(JdbcDatabaseType.detect(dataSource), tableName)
+                JdbcOnceMarkerQueriesFactory.create(JdbcDatabaseType.from(dataSource), tableNameResolver.onceMarker)
             },
         )
-    }
 
     /**
      * Creates the default execution service, which owns each protected invocation's transaction.

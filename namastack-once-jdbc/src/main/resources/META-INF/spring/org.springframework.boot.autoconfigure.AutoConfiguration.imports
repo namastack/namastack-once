@@ -1,1 +1,2 @@
+io.namastack.once.config.JdbcOnceSchemaAutoConfiguration
 io.namastack.once.config.JdbcOnceAutoConfiguration

@@ -25,10 +25,10 @@ object JdbcOnceMarkerQueriesFactory {
         tableName: String,
     ): JdbcOnceMarkerQueries =
         when (database) {
-            JdbcDatabaseType.POSTGRESQL -> PostgresJdbcOnceMarkerQueries(tableName)
-            JdbcDatabaseType.MYSQL, JdbcDatabaseType.MARIADB -> MySqlJdbcOnceMarkerQueries(tableName)
+            JdbcDatabaseType.PostgreSQL -> PostgresJdbcOnceMarkerQueries(tableName)
+            JdbcDatabaseType.MySQL, JdbcDatabaseType.MariaDB -> MySqlJdbcOnceMarkerQueries(tableName)
             JdbcDatabaseType.H2 -> H2JdbcOnceMarkerQueries(tableName)
-            JdbcDatabaseType.ORACLE -> OracleJdbcOnceMarkerQueries(tableName)
-            JdbcDatabaseType.SQLSERVER -> SqlServerJdbcOnceMarkerQueries(tableName)
+            JdbcDatabaseType.Oracle -> OracleJdbcOnceMarkerQueries(tableName)
+            JdbcDatabaseType.SQLServer -> SqlServerJdbcOnceMarkerQueries(tableName)
         }
 }

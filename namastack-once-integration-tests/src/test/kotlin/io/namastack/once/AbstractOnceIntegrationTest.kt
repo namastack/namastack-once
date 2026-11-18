@@ -1,9 +1,9 @@
 package io.namastack.once
 
+import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.BeforeEach
-import org.springframework.core.io.ClassPathResource
+import org.junit.jupiter.api.Test
 import org.springframework.jdbc.core.JdbcTemplate
-import org.springframework.jdbc.datasource.init.ResourceDatabasePopulator
 import org.springframework.jdbc.support.JdbcTransactionManager
 import org.springframework.transaction.PlatformTransactionManager
 import javax.sql.DataSource
@@ -31,18 +31,7 @@ abstract class AbstractOnceIntegrationTest :
     fun prepareDatabase() {
         dataSource = createDataSource()
         jdbc = JdbcTemplate(dataSource)
-        listOf("business_effect", "once_marker").forEach { table ->
-            if (database == "oracle") {
-                jdbc.execute(
-                    "BEGIN EXECUTE IMMEDIATE 'DROP TABLE $table'; " +
-                        "EXCEPTION WHEN OTHERS THEN IF SQLCODE != -942 THEN RAISE; END IF; END;",
-                )
-            } else {
-                jdbc.execute("DROP TABLE IF EXISTS $table")
-            }
-        }
-        ResourceDatabasePopulator(ClassPathResource("schema/$database.sql")).execute(dataSource)
-        jdbc.execute("CREATE TABLE business_effect (id VARCHAR(100) PRIMARY KEY, amount INTEGER NOT NULL)")
+        resetDatabase()
         manager = createTransactionManager(dataSource)
         clock = MutableOnceClock()
         markerRepository = createTestRepository(dataSource, manager)
@@ -53,5 +42,35 @@ abstract class AbstractOnceIntegrationTest :
                 IdempotencyKeyNormalizer(),
                 clock,
             )
+    }
+
+    @Test
+    fun `reinitializing the schema preserves committed markers`() {
+        val request = request("schema-reinitialization")
+        once.executeWithoutResult(request) { effect("original") }
+
+        initializeTestMarkerSchema(dataSource)
+
+        assertThat(once.executeWithoutResult(request) { error("duplicate must skip") }.wasExecuted()).isFalse()
+        assertThat(markers()).isEqualTo(1)
+        assertThat(effects()).isEqualTo(1)
+    }
+
+    private fun resetDatabase() {
+        dropTable("business_effect")
+        dropTable("once_marker")
+        initializeTestMarkerSchema(dataSource)
+        jdbc.execute("CREATE TABLE business_effect (id VARCHAR(100) PRIMARY KEY, amount INTEGER NOT NULL)")
+    }
+
+    private fun dropTable(tableName: String) {
+        if (database == "oracle") {
+            jdbc.execute(
+                "BEGIN EXECUTE IMMEDIATE 'DROP TABLE $tableName'; " +
+                    "EXCEPTION WHEN OTHERS THEN IF SQLCODE != -942 THEN RAISE; END IF; END;",
+            )
+        } else {
+            jdbc.execute("DROP TABLE IF EXISTS $tableName")
+        }
     }
 }

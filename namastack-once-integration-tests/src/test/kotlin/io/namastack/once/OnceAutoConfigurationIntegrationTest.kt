@@ -3,6 +3,8 @@ package io.namastack.once
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.params.ParameterizedTest
+import org.junit.jupiter.params.provider.ValueSource
 import org.springframework.beans.factory.getBean
 import org.springframework.jdbc.core.JdbcTemplate
 import java.io.IOException
@@ -90,25 +92,22 @@ class OnceAutoConfigurationIntegrationTest {
             }
     }
 
-    @Test
-    fun `invalid signatures keys asynchronous result methods and transaction attributes fail startup`() {
-        listOf(
-            InvalidReturnHandler::class.java,
-            InvalidKeyHandler::class.java,
-            ReadOnlyOrderHandler::class.java,
-            AsyncOrderHandler::class.java,
-            FinalOrderHandler::class.java,
-        ).forEach { handlerType ->
-            runner.withBean(handlerType).run { context -> assertThat(context).hasFailed() }
-        }
+    @ParameterizedTest(name = "rejects {0}")
+    @ValueSource(
+        classes = [
+            InvalidReturnHandler::class,
+            InvalidKeyHandler::class,
+            ReadOnlyOrderHandler::class,
+            AsyncOrderHandler::class,
+            FinalOrderHandler::class,
+        ],
+    )
+    fun `invalid handler declarations fail startup`(handlerType: Class<*>) {
+        runner.withBean(handlerType).run { context -> assertThat(context).hasFailed() }
     }
 
     @Test
     fun `disabling Once leaves annotated handlers running without duplicate protection`() {
-        runner.withPropertyValues("namastack.once.enabled=false").run { context ->
-            assertThat(context).hasNotFailed()
-            assertThat(context).doesNotHaveBean(IdempotencyOperations::class.java)
-        }
         runner
             .withPropertyValues("namastack.once.enabled=false")
             .withBean(AnnotatedOrderHandler::class.java)
@@ -120,7 +119,6 @@ class OnceAutoConfigurationIntegrationTest {
                 handler.process("unprotected")
                 val jdbc = context.getBean<JdbcTemplate>()
                 assertThat(countOnceRows(jdbc, "business_effect")).isEqualTo(2)
-                assertThat(countOnceRows(jdbc, "once_marker")).isZero()
             }
     }
 

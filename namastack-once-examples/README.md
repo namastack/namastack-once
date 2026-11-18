@@ -4,6 +4,7 @@
 |---------|---------|----------|
 | [Java](namastack-once-example-java) | Result-returning adapter annotation and framework-free input port | H2 |
 | [Kotlin](namastack-once-example-kotlin) | Programmatic API and void annotation | H2 |
+| [Custom schema and table](namastack-once-example-custom-schema) | Configured schema and marker table with application-managed SQL | H2 |
 | [Multiple instances](namastack-once-example-multiple-instances) | Named Once beans and separate marker tables | H2 |
 | [Spring Modulith](namastack-once-example-modulith) | Async module listener, atomic marker writes and durable publication retries | H2 |
 | [MongoDB](namastack-once-example-mongodb) | Native MongoDB transactions, exact microsecond retention, annotated and programmatic APIs | MongoDB replica set |

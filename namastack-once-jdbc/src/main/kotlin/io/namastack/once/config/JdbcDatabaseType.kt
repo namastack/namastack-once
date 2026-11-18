@@ -5,68 +5,170 @@ import java.sql.DatabaseMetaData
 import javax.sql.DataSource
 
 /**
- * Supported SQL dialects for JDBC marker reservation and cleanup.
+ * Sealed class representing supported database types.
  *
- * Detection uses Spring's transaction-aware database metadata access.
+ * Each database type specifies the location of its SQL schema initialization script.
+ * This enables database-agnostic schema creation with database-specific SQL variants.
  *
- * @author Roland Beisel
+ * Supported Databases:
+ * - **PostgreSQL**: Advanced relational database with strong ACID guarantees
+ * - **MySQL**: Popular open-source relational database
+ * - **H2**: In-memory/file-based database for testing and development
+ * - **MariaDB**: MySQL-compatible open-source database
+ * - **SQL Server**: Microsoft's enterprise relational database
+ *
+ * @param schemaLocation Classpath location of the database-specific schema script
+ *
+ * @author Roland Beisel, Khalid Alharisi
  * @since 0.1.0
  */
-enum class JdbcDatabaseType {
-    /** PostgreSQL statements using a locking CTE for bounded cleanup. */
-    POSTGRESQL,
+sealed class JdbcDatabaseType(
+    /**
+     * Classpath location of the database-specific schema script.
+     *
+     * @since 0.2.0
+     */
+    val schemaLocation: String,
+    /**
+     * Separator used by the database-specific schema script.
+     *
+     * @since 0.2.0
+     */
+    val statementSeparator: String = ";",
+) {
+    /**
+     * PostgreSQL database type.
+     *
+     * Uses advanced PostgreSQL features like JSON operators, intervals, and
+     * CTE (Common Table Expressions) for optimal partition management queries.
+     *
+     * @since 0.2.0
+     */
+    data object PostgreSQL : JdbcDatabaseType(
+        schemaLocation = "classpath:schema/postgres/once-tables.sql",
+    )
 
-    /** MySQL statements using a native DELETE limit. */
-    MYSQL,
+    /**
+     * MySQL database type.
+     *
+     * Supports MySQL 8.0+ with InnoDB storage engine for transactional support
+     * and row-level locking required for optimistic locking (version fields).
+     *
+     * @since 0.2.0
+     */
+    data object MySQL : JdbcDatabaseType(
+        schemaLocation = "classpath:schema/mysql/once-tables.sql",
+    )
 
-    /** MariaDB statements sharing MySQL's native DELETE limit. */
-    MARIADB,
+    /**
+     * H2 in-memory/file-based database type.
+     *
+     * Suitable for testing, development, and small deployments.
+     * Provides quick feedback loop for integration tests.
+     *
+     * @since 0.2.0
+     */
+    data object H2 : JdbcDatabaseType(
+        schemaLocation = "classpath:schema/h2/once-tables.sql",
+    )
 
-    /** Oracle statements using ROWNUM to bound cleanup. */
-    ORACLE,
+    /**
+     * MariaDB database type.
+     *
+     * MySQL-compatible open-source database with improved performance
+     * and additional features like JSON functions and window functions.
+     *
+     * @since 0.2.0
+     */
+    data object MariaDB : JdbcDatabaseType(
+        schemaLocation = "classpath:schema/mariadb/once-tables.sql",
+    )
 
-    /** SQL Server statements using DELETE TOP to bound cleanup. */
-    SQLSERVER,
+    /**
+     * SQL Server database type.
+     *
+     * Microsoft's enterprise relational database with T-SQL support.
+     * SQL Server 2016+ is recommended for compatibility.
+     *
+     * @since 0.2.0
+     */
+    data object SQLServer : JdbcDatabaseType(
+        schemaLocation = "classpath:schema/sqlserver/once-tables.sql",
+    )
 
-    /** H2 statements using FETCH to bound cleanup. */
-    H2,
-    ;
+    /**
+     * Oracle database type.
+     *
+     * Oracle Database is a high-performance, converged relational database designed to handle
+     * complex enterprise workloads.
+     *
+     * The minimum supported Oracle Database version is 18c. Older versions may work, but they are not tested.
+     *
+     * @since 0.2.0
+     */
+    data object Oracle : JdbcDatabaseType(
+        schemaLocation = "classpath:schema/oracle/once-tables.sql",
+        statementSeparator = "/",
+    )
 
     companion object {
         /**
-         * Maps a supported database name to its SQL dialect, ignoring case.
+         * Resolves a database type from its name.
          *
-         * @param databaseName Supported JDBC database product name.
-         * @return The supported SQL dialect.
-         * @throws IllegalArgumentException if the database name is unsupported.
+         * Performs case-insensitive matching against the database product names
+         * reported by the JDBC driver's DatabaseMetaData.getDatabaseProductName().
+         *
+         * @param databaseName The database name/product name from JDBC
+         * @return Corresponding JdbcDatabaseType
+         * @throws IllegalArgumentException if database type is not supported
          */
-        @JvmStatic
         fun from(databaseName: String): JdbcDatabaseType =
             when (databaseName.lowercase()) {
-                "postgresql" -> POSTGRESQL
-                "mysql" -> MYSQL
-                "mariadb" -> MARIADB
+                "postgresql" -> PostgreSQL
+                "mysql" -> MySQL
                 "h2" -> H2
-                "oracle" -> ORACLE
-                "microsoft sql server" -> SQLSERVER
-                else -> throw IllegalArgumentException("Unsupported Once JDBC database: $databaseName")
+                "mariadb" -> MariaDB
+                "microsoft sql server" -> SQLServer
+                "oracle" -> Oracle
+                else -> throw IllegalArgumentException("Unsupported database type: $databaseName")
             }
 
         /**
-         * Reads the database product name using a connection obtained through Spring.
+         * Resolves the database type of a data source from its JDBC metadata.
          *
-         * @param dataSource Datasource whose database metadata identifies the dialect.
-         * @return The supported SQL dialect.
-         * @throws org.springframework.jdbc.support.MetaDataAccessException if database metadata cannot be read.
-         * @throws IllegalStateException if the metadata does not provide a database name.
-         * @throws IllegalArgumentException if the database product is unsupported.
+         * @param dataSource The data source to inspect
+         * @return Corresponding JdbcDatabaseType
+         * @throws RuntimeException if the database name cannot be detected
+         * @throws IllegalArgumentException if database type is not supported
+         * @since 0.2.0
          */
-        @JvmStatic
-        fun detect(dataSource: DataSource): JdbcDatabaseType {
-            val productName = JdbcUtils.extractDatabaseMetaData(dataSource, DatabaseMetaData::getDatabaseProductName)
+        fun from(dataSource: DataSource): JdbcDatabaseType {
             val databaseName =
-                checkNotNull(JdbcUtils.commonDatabaseName(productName)) { "Could not detect database name" }
+                try {
+                    val metadata =
+                        JdbcUtils.extractDatabaseMetaData(dataSource, DatabaseMetaData::getDatabaseProductName)
+                    JdbcUtils.commonDatabaseName(metadata) ?: throw RuntimeException("Could not detect database name")
+                } catch (e: Exception) {
+                    throw RuntimeException("Could not detect database name", e)
+                }
             return from(databaseName)
+        }
+
+        /**
+         * Resolves the database type of a data source, or `null` if the product is not supported.
+         *
+         * Opens one connection, or reuses the connection bound to the current transaction.
+         *
+         * @param dataSource The data source to inspect
+         * @return Corresponding JdbcDatabaseType, or `null` if the product is not supported
+         * @throws org.springframework.jdbc.support.MetaDataAccessException if the metadata cannot be read
+         * @since 0.1.0
+         */
+        internal fun detect(dataSource: DataSource): JdbcDatabaseType? {
+            val productName = JdbcUtils.extractDatabaseMetaData(dataSource, DatabaseMetaData::getDatabaseProductName)
+            val databaseName = JdbcUtils.commonDatabaseName(productName) ?: return null
+
+            return runCatching { from(databaseName) }.getOrNull()
         }
     }
 }

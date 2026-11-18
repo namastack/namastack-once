@@ -1,15 +1,27 @@
 {
   "properties": [
     {
+      "name": "namastack.once.jdbc.schema-name",
+      "type": "java.lang.String",
+      "description": "Database schema name for once tables (e.g., 'myschema' results in 'myschema.once_marker')"
+    },
+    {
+      "name": "namastack.once.jdbc.table-prefix",
+      "type": "java.lang.String",
+      "defaultValue": "",
+      "description": "Prefix to apply to all once table names (e.g., 'my_' results in 'my_once_marker')"
+    },
+    {
       "name": "namastack.once.jdbc.table-name",
       "type": "java.lang.String",
       "defaultValue": "once_marker",
-      "description": "Existing marker table for the auto-configured default Once instance. Once never creates or migrates tables."
+      "description": "Base table name for idempotency markers (before prefix and schema are applied)"
     },
     {
-      "name": "namastack.once.jdbc.schema-name",
-      "type": "java.lang.String",
-      "description": "Optional existing schema for the default Once instance (database/catalog for MySQL or MariaDB)."
+      "name": "namastack.once.jdbc.schema-initialization.enabled",
+      "type": "java.lang.Boolean",
+      "defaultValue": true,
+      "description": "Whether schema initialization is enabled at startup"
     }
   ]
 }

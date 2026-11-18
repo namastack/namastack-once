@@ -78,7 +78,7 @@ source properties. Java 17 or later and the configured Gradle toolchains are req
 Kafka is available at localhost:9092; set `KAFKA_BOOTSTRAP_SERVERS` to use another broker.
 The example uses in-memory H2; restarting the app clears orders and markers, while the
 Docker broker can still contain messages. For a fresh demo, also recreate the broker.
-Outbox creates its own tables; the application explicitly initializes Once and demo tables.
+Once and Outbox create their own tables automatically; Spring SQL initialization creates only the demo tables.
 
 Open http://localhost:8080/demo/orders/request-123 in the browser. This GET demo endpoint
 creates sample data. The first response is `executed`; reloading returns `duplicate`

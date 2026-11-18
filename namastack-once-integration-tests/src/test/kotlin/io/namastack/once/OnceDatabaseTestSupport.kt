@@ -2,8 +2,10 @@ package io.namastack.once
 
 import io.namastack.once.config.JdbcDatabaseType
 import io.namastack.once.query.JdbcOnceMarkerQueriesFactory
+import org.springframework.core.io.DefaultResourceLoader
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.jdbc.core.queryForObject
+import org.springframework.jdbc.datasource.init.ResourceDatabasePopulator
 import org.springframework.transaction.PlatformTransactionManager
 import javax.sql.DataSource
 
@@ -35,6 +37,16 @@ fun createTestRepository(
 ): IdempotencyMarkerRepository {
     val qualifiedName = schemaName?.let { "$it.$tableName" } ?: tableName
     return JdbcIdempotencyMarkerRepository(dataSource, transactionManager) {
-        JdbcOnceMarkerQueriesFactory.create(JdbcDatabaseType.detect(dataSource), qualifiedName)
+        JdbcOnceMarkerQueriesFactory.create(JdbcDatabaseType.from(dataSource), qualifiedName)
     }
+}
+
+/** Applies the marker schema once, using the dialect's script and statement separator. */
+fun initializeTestMarkerSchema(dataSource: DataSource) {
+    val databaseType = JdbcDatabaseType.from(dataSource)
+    val script = DefaultResourceLoader().getResource(databaseType.schemaLocation)
+    ResourceDatabasePopulator(script)
+        .apply {
+            setSeparator(databaseType.statementSeparator)
+        }.execute(dataSource)
 }

@@ -78,8 +78,10 @@ class JdbcOnceAutoConfigurationIntegrationTest {
     @Test
     fun `default wiring uses trusted configured table names without identifier validation`() {
         onceTestApplicationContext()
-            .withPropertyValues("namastack.once.jdbc.table-name=\"custom marker\"")
-            .run { context ->
+            .withPropertyValues(
+                "namastack.once.jdbc.table-name=\"custom marker\"",
+                "namastack.once.jdbc.schema-initialization.enabled=false",
+            ).run { context ->
                 assertThat(context).hasNotFailed()
                 val jdbc = context.getBean<JdbcTemplate>()
                 jdbc.execute(
@@ -91,7 +93,7 @@ class JdbcOnceAutoConfigurationIntegrationTest {
                 once.executeWithoutResult(request) { }
                 assertThat(once.executeWithoutResult(request) { error("duplicate must skip") }.wasExecuted()).isFalse()
                 assertThat(jdbc.queryForObject<Int>("SELECT COUNT(*) FROM \"custom marker\"")).isEqualTo(1)
-                assertThat(jdbc.queryForObject<Int>("SELECT COUNT(*) FROM once_marker")).isZero()
+                assertThat(countTables(context.getBean<DataSource>())).isZero()
             }
     }
 

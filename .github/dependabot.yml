@@ -8,6 +8,7 @@ updates:
     directories:
       - "/namastack-once-examples/namastack-once-example-java"
       - "/namastack-once-examples/namastack-once-example-kotlin"
+      - "/namastack-once-examples/namastack-once-example-custom-schema"
       - "/namastack-once-examples/namastack-once-example-modulith"
       - "/namastack-once-examples/namastack-once-example-mongodb"
       - "/namastack-once-examples/namastack-once-example-multiple-instances"

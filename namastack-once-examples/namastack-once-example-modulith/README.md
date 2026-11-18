@@ -38,7 +38,8 @@ processing with a Once-owned transaction, duplicate publication, producer rollba
 resubmission, and lost commit acknowledgement with duplicate suppression on resubmission.
 The commit faults are injected by a transaction manager declared inside the test class.
 
-The example uses in-memory H2 and needs no Docker. Spring SQL initialization explicitly applies the
-application-owned Once, business, and Modulith scripts in `src/main/resources/db/migration`.
-The Modulith script matches version 2.1.2. Neither Once nor Modulith schema auto-creation is enabled.
+The example uses in-memory H2 and needs no Docker. Once automatically creates its marker table and
+expiry index at startup. Spring SQL initialization applies the application-owned business and Modulith
+scripts in `src/main/resources/db/migration`. The Modulith script matches version 2.1.2;
+Modulith schema auto-creation is disabled.
 No Modulith dependency is added to the Once library.
