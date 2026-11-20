@@ -402,6 +402,9 @@ fun on(event: OrderPlaced)
 
 ### E. Turning Values into Bytes
 
+Options E2 and E3 define their own encoding. It frames every part with a type tag and a
+length or count, so different structures never produce the same bytes.
+
 #### Option E1: General-purpose serializer
 
 Values are serialized with a configured general-purpose serializer, for example
@@ -434,8 +437,8 @@ IdempotencyFingerprint.of(cmd.customerId, cmd.total, cmd.requestedAt, mapOf("cha
 #### Option E3: Minimal canonical encoding plus mappers
 
 Once encodes only types with a single representation: strings, integers, booleans,
-byte arrays, null, lists and nested fingerprints. Every part is framed with a type tag
-and a length or count. Other types are converted by application mappers.
+byte arrays, null, lists and nested fingerprints. Other types are converted by
+application mappers.
 
 - Every equality decision lives in application code, where it is visible and
   versionable. The encoding is small enough to specify completely and keep stable.
@@ -449,127 +452,113 @@ IdempotencyFingerprint.builder()
     .build()
 ```
 
-### F. Reusing Conversions Across Mappers
+### F. Persisting the Fingerprint
 
-Applies to E3.
+#### Option F1: Included in the identity hash
 
-#### Option F1: Plain injection
+The identity digest covers scope, key and fingerprint. No new column is added.
 
-Mappers share conversion helpers as ordinary injected beans.
-
-- No new concepts, fully transparent.
-- Nothing ensures that all mappers use the same rule for a type.
-
-```kotlin
-class CreateOrderFingerprint(private val money: MoneyFingerprint) : IdempotencyFingerprintMapper<CreateOrder> {
-    override fun map(subject: CreateOrder) =
-        IdempotencyFingerprint.builder().add(subject.customerId).add(money.encode(subject.total)).build()
-}
-```
-
-#### Option F2: Converter registry, writing into a builder
-
-An `IdempotencyFingerprintConverter<T>` interface writes a value into a builder.
-Converter beans are registered per Once instance and used by a builder that adds values
-of any type.
-
-- One rule per type for the whole application, similar to `IdempotencyKeyNormalizer`.
-- Converters can write arbitrary parts into a foreign builder, and a second interface
-  has nearly the same role as the mapper.
-
-```kotlin
-fun interface IdempotencyFingerprintConverter<in T> {
-    fun convert(value: T, builder: IdempotencyFingerprint.Builder)
-}
-
-@Bean
-fun money() = IdempotencyFingerprintConverter<BigDecimal> { value, builder ->
-    builder.add(value.stripTrailingZeros().toPlainString())
-}
-```
-
-#### Option F3: Mapper registry, returning a fingerprint
-
-`IdempotencyFingerprintMapper` also serves as converter. A builder from the
-`IdempotencyFingerprints` factory bean looks up mapper beans by type and nests their
-result. A mapper can also be passed explicitly.
-
-- One interface for top-level and part mappers, pure functions, and no converter
-  chains, because mappers build with a builder that knows only built-in types.
-- A converted value is encoded as a nested fingerprint, so it differs from the same
-  value added inline. Changing a shared mapper changes every fingerprint that uses it.
-
-```kotlin
-@Bean
-fun money() = IdempotencyFingerprintMapper<BigDecimal> {
-    IdempotencyFingerprint.of(it.stripTrailingZeros().toPlainString())
-}
-
-class CreateOrderFingerprint(private val fingerprints: IdempotencyFingerprints) :
-    IdempotencyFingerprintMapper<CreateOrder> {
-    override fun map(subject: CreateOrder) =
-        fingerprints.builder()
-            .add(subject.customerId)              // built-in
-            .add(subject.total)                   // BigDecimal mapper bean, found by type
-            .add(subject.requestedAt, InstantMillis) // explicit mapper
-            .build()
-}
-```
-
-### G. Encoding Details
-
-Encoded bytes are shown in hexadecimal: tag, then length or count, then content.
-
-#### Option G1: Integers as fixed 8 bytes
-
-All integer types are widened to 64 bits.
-
-- Trivial, no length field.
-- A future `BigInteger` would need a separate tag, so `BigInteger(42)` and `42L` would
-  differ.
+- No schema change.
+- Different content produces a different identity, so the operation runs again. A
+  mismatch can never be detected.
 
 ```
-42 / 42L        02 00000000 0000002A
--1              02 FFFFFFFF FFFFFFFF
+idempotency_hash = SHA-256(scope, key, fingerprint)
 ```
 
-#### Option G2: Integers as minimal two's complement with a length
+#### Option F2: Digest in a separate column
 
-The representation of `BigInteger.toByteArray()`.
+A new nullable column `request_fingerprint` holds the fingerprint digest.
 
-- Covers all built-in integer types and a future `BigInteger` with one tag.
-- Slightly more complex than G1.
+- Small, and no request content is stored.
+- Shows that content differs, not where.
 
-```
-42 / 42L        02 00000001 2A
--1              02 00000001 FF
-5_000_000_000L  02 00000005 012A05F200
-```
-
-#### Option G3: Separate tags for lists and nested fingerprints
-
-Lists (tag `05`) and nested fingerprints (tag `06`) have their own tags with the same
-layout.
-
-- Switching between a list and a nested fingerprint changes the digest.
-- One more tag than strictly necessary, as both have the same layout.
-
-```
-listOf("ab")             05 00000001 | 01 00000002 6162
-nested fingerprint "ab"  06 00000001 | 01 00000002 6162
+```sql
+-- column type depends on group G
+request_fingerprint CHAR(64)     NULL  -- 3f2a…
+request_fingerprint VARCHAR(255) NULL  -- k=2026-11:v=2:3f2a…
 ```
 
-#### Option G4: Shared tag for lists and nested fingerprints
+#### Option F3: Readable canonical content
 
-Lists and nested fingerprints are both encoded with tag `05`.
+A new column holds the canonical fingerprint parts in readable form.
 
-- One concept for groups of parts.
-- A mapper that switches between the two produces the same digest, so the change goes
-  unnoticed.
+- Mismatch diagnostics can show which part changed.
+- Stores business and possibly personal data of unbounded size in the marker table.
+
+```sql
+request_fingerprint_data TEXT NULL      -- ["c-42", "19.9"]
+```
+
+#### Option F4: One digest per top-level part
+
+The fingerprint column holds one digest per top-level part instead of one combined
+digest.
+
+- Shows which argument changed without storing content.
+- Larger values and a more complex format for limited gain.
+
+```sql
+request_fingerprint VARCHAR(...) NULL   -- 3f2a…,9b41…
+```
+
+### G. Format of the Stored Value
+
+Applies to F2. Comparing a stored digest later can require metadata next to it: mapper
+versions (group I), an HMAC key ID (group J) and, if ever needed, an encoding version
+(group H). These options decide whether and how that metadata is stored.
+
+#### Option G1: Digest only
+
+The column holds only the digest, with the same shape and rules as the identity digest.
+
+- Nothing to parse, and the database enforces the size.
+- No room for metadata. Adding versions or HMAC later requires a schema change in every
+  dialect.
+
+```sql
+request_fingerprint CHAR(64) NULL       -- 3f2a…
+```
+
+#### Option G2: Bare digest with additional columns
+
+The metadata is stored in separate columns next to a bare digest.
+
+- No parsing, same shape as the identity digest.
+- Every new concept requires a schema change in all dialects.
+
+```sql
+request_fingerprint        CHAR(64)    NULL,   -- 3f2a…
+request_fingerprint_key_id VARCHAR(50) NULL,   -- 2026-11
+request_fingerprint_versions VARCHAR(50) NULL  -- 2,1
+```
+
+#### Option G3: Positional prefixes
+
+The digest is preceded by positional prefixes for the scheme, key ID and versions.
+
+- Compact.
+- Optional parts make positions ambiguous, and adding a part changes the format.
 
 ```
-listOf("ab")             05 00000001 | 01 00000002 6162
-nested fingerprint "ab"  05 00000001 | 01 00000002 6162
+s1:3f2a…
+h1:2026-11:3f2a…
+h1:2026-11:2,1:3f2a…    is "2,1" a version list or part of something else?
+```
+
+#### Option G4: Named tags
+
+The value is a list of `name=value` tags followed by the digest. Defaults are omitted,
+and unknown tags make a value not comparable.
+
+- Self-describing, order-independent, and extensible without schema changes. Older
+  Once versions handle values written by newer ones safely.
+- Values must be parsed, and tag values must not contain separators.
+
+```
+3f2a…
+v=2,1:3f2a…
+k=2026-11:v=2,1:3f2a…
 ```
 
 ### H. Encoding Stability
@@ -612,100 +601,7 @@ version tag is reserved, with absence meaning version 1, but not implemented.
 e=2:9b41…    reserved, only if an existing tag's encoding must ever change
 ```
 
-### I. Persisting the Fingerprint
-
-#### Option I1: Included in the identity hash
-
-The identity digest covers scope, key and fingerprint. No new column is added.
-
-- No schema change.
-- Different content produces a different identity, so the operation runs again. A
-  mismatch can never be detected.
-
-```
-idempotency_hash = SHA-256(scope, key, fingerprint)
-```
-
-#### Option I2: Digest in a separate column
-
-A new nullable column `request_fingerprint` holds the fingerprint digest.
-
-- Small, and no request content is stored.
-- Shows that content differs, not where.
-
-```sql
-request_fingerprint VARCHAR(255) NULL   -- 3f2a…
-```
-
-#### Option I3: Readable canonical content
-
-A new column holds the canonical fingerprint parts in readable form.
-
-- Mismatch diagnostics can show which part changed.
-- Stores business and possibly personal data of unbounded size in the marker table.
-
-```sql
-request_fingerprint_data TEXT NULL      -- ["c-42", "19.9"]
-```
-
-#### Option I4: One digest per top-level part
-
-The fingerprint column holds one digest per top-level part instead of one combined
-digest.
-
-- Shows which argument changed without storing content.
-- Larger values and a more complex format for limited gain.
-
-```sql
-request_fingerprint VARCHAR(...) NULL   -- 3f2a…,9b41…
-```
-
-### J. Format of the Stored Value
-
-Applies to I2.
-
-#### Option J1: Bare digest with additional columns
-
-The column holds only the digest. Versions and key IDs, if added, get their own columns.
-
-- No parsing, same shape as the identity digest.
-- Every new concept requires a schema change in all dialects.
-
-```sql
-request_fingerprint        CHAR(64)    NULL,   -- 3f2a…
-request_fingerprint_key_id VARCHAR(50) NULL,   -- 2026-11
-request_fingerprint_versions VARCHAR(50) NULL  -- 2,1
-```
-
-#### Option J2: Positional prefixes
-
-The digest is preceded by positional prefixes for the scheme, key ID and versions.
-
-- Compact.
-- Optional parts make positions ambiguous, and adding a part changes the format.
-
-```
-s1:3f2a…
-h1:2026-11:3f2a…
-h1:2026-11:2,1:3f2a…    is "2,1" a version list or part of something else?
-```
-
-#### Option J3: Named tags
-
-The value is a list of `name=value` tags followed by the digest. Defaults are omitted,
-and unknown tags make a value not comparable.
-
-- Self-describing, order-independent, and extensible without schema changes. Older
-  Once versions handle values written by newer ones safely.
-- Values must be parsed, and tag values must not contain separators.
-
-```
-3f2a…
-v=2,1:3f2a…
-k=2026-11:v=2,1:3f2a…
-```
-
-### K. Changing a Fingerprint Definition
+### I. Changing a Fingerprint Definition
 
 The examples change this mapper by adding the delivery address:
 
@@ -713,7 +609,7 @@ The examples change this mapper by adding the delivery address:
 IdempotencyFingerprint.builder().add(subject.customerId).add(subject.total, Money).build()
 ```
 
-#### Option K1: Breaking change
+#### Option I1: Breaking change
 
 Changing a mapper changes digests. This is documented, and applications accept false
 mismatches until old markers expire.
@@ -721,7 +617,7 @@ mismatches until old markers expire.
 - No additional concepts.
 - Retries during a deployment can be rejected as mismatches.
 
-#### Option K2: Manual versions, not comparable across versions
+#### Option I2: Manual versions, not comparable across versions
 
 `IdempotencyFingerprintMapper` gains a `version` property, which is stored with the
 digest. Fingerprints with different versions are not compared.
@@ -740,9 +636,9 @@ class CreateOrderFingerprint : IdempotencyFingerprintMapper<CreateOrder> {
 // stored v=1 vs computed v=2 → not comparable → Duplicate
 ```
 
-#### Option K3: Manual versions with recomputation
+#### Option I3: Manual versions with recomputation
 
-As K2, but a `VersionedIdempotencyFingerprintMapper` can compute older versions, and
+As I2, but a `VersionedIdempotencyFingerprintMapper` can compute older versions, and
 Once recomputes the fingerprint in the stored version.
 
 - Mismatches stay detectable across changes.
@@ -762,7 +658,7 @@ class CreateOrderFingerprint : VersionedIdempotencyFingerprintMapper<CreateOrder
 // stored v=1 → recomputed with version "1" → Duplicate or Mismatch
 ```
 
-#### Option K4: Versions derived from the fingerprint's structure
+#### Option I4: Versions derived from the fingerprint's structure
 
 Once computes the version from the sequence of part types, without their values.
 
@@ -777,7 +673,7 @@ Once computes the version from the sequence of part types, without their values.
 address = null  vs  address = "Main 1"    shape …, NULL vs …, STR different version for the same mapper
 ```
 
-#### Option K5: Versions derived from mapper bytecode
+#### Option I5: Versions derived from mapper bytecode
 
 Once computes the version from the mapper class's bytecode.
 
@@ -789,9 +685,9 @@ Once computes the version from the mapper class's bytecode.
 version = sha256(CreateOrderFingerprint.class bytes)
 ```
 
-### L. Protecting Low-Entropy Content
+### J. Protecting Low-Entropy Content
 
-#### Option L1: Plain SHA-256 only
+#### Option J1: Plain SHA-256 only
 
 Fingerprints are always plain SHA-256 digests.
 
@@ -802,7 +698,7 @@ Fingerprints are always plain SHA-256 digests.
 SHA-256("c-42" | "19.9")    can be found by trying all customer IDs and amounts
 ```
 
-#### Option L2: HMAC in application mappers
+#### Option J2: HMAC in application mappers
 
 Mappers hash their content with an application secret and add the result as bytes.
 
@@ -814,7 +710,7 @@ override fun map(subject: CreateOrder) =
     IdempotencyFingerprint.ofBytes(hmacSha256(secret, subject.customerId, subject.total))
 ```
 
-#### Option L3: Built-in HMAC with a stored key ID
+#### Option J3: Built-in HMAC with a stored key ID
 
 Once computes HMAC-SHA-256 with configured keys and stores the key ID with the digest.
 Old keys stay configured for verification until retention expires.
@@ -833,7 +729,7 @@ namastack:
           "2026-05": ${ONCE_FP_KEY_2026_05}   # verify only
 ```
 
-#### Option L4: Built-in HMAC trying all keys
+#### Option J4: Built-in HMAC trying all keys
 
 No key ID is stored. Once tries every configured key.
 
@@ -844,3 +740,268 @@ No key ID is stored. Once tries every configured key.
 ```
 stored 3f2a… → try HMAC(2026-11), HMAC(2026-05), SHA-256 → any match = Duplicate
 ```
+
+## Decision
+
+TBD
+
+## Rationale
+
+TBD
+
+## Consequences
+
+TBD
+
+## Follow-up Work
+
+TBD
+
+## Solution Implementation Details
+
+This section describes how the selected solution looks. It supports the decision process
+only and is removed before the ADR is accepted.
+
+### Outcome
+
+```kotlin
+sealed interface IdempotencyResult<T> {
+    data class Executed<T>(val value: T) : IdempotencyResult<T>
+    data class Duplicate<T>(val context: IdempotencyDuplicateContext) : IdempotencyResult<T>
+    data class Mismatch<T>(val context: IdempotencyDuplicateContext) : IdempotencyResult<T>
+}
+// fold(onExecuted, onDuplicate, onMismatch)
+```
+
+Methods without a return value choose per declaration with
+`@Idempotent(onMismatch = OnMismatch.SKIP | FAIL)`, defaulting to `SKIP`. `FAIL` throws
+`IdempotencyFingerprintMismatchException`. Every mismatch emits a metric, a tracing
+event and a WARN log.
+
+### Mapper
+
+One interface serves every role:
+
+```kotlin
+fun interface IdempotencyFingerprintMapper<in T> {
+    fun map(subject: T): IdempotencyFingerprint
+}
+```
+
+- **Top-level mapper:** selected by a declaration.
+- **Part mapper:** converts one value inside another fingerprint, found by type or
+  passed explicitly.
+
+### Declaration
+
+Fingerprinting is opt-in per declaration. A mapper bean never enables it on its own; a
+mapper bean that no declaration uses is logged once at INFO.
+
+**Method level:** an array of mapper classes. A class reference resolves to a bean of
+that class if one exists; otherwise Spring instantiates it. Each mapper is matched to
+exactly one parameter by its type `T`, and each parameter to at most one mapper. Parts
+are combined in array order. The empty default disables fingerprinting.
+
+```kotlin
+@Idempotent(scope = "order.create", key = "#cmd.requestId",
+            fingerprint = [CreateOrderFingerprint::class, TenantFingerprint::class])
+fun create(cmd: CreateOrder, tenant: TenantId): IdempotencyResult<Order>
+```
+
+**Parameter level:** for same-type parameters, bean names and whole-content
+fingerprints. Parts are combined in parameter order.
+
+```kotlin
+fun on(
+    @IdempotencyFingerprint event: OrderPlaced,                               // mapper bean by type
+    @IdempotencyFingerprint(mapper = TenantFingerprint::class) tenant: String,
+    @IdempotencyFingerprint(mapperBean = "regionFingerprint") region: String,
+)
+```
+
+Using both levels on one method fails at startup. There is no annotation on DTO
+classes.
+
+**Programmatic:**
+
+```kotlin
+request.withFingerprint(IdempotencyFingerprint.builder().add(cmd.customerId).build())
+request.withFingerprint(cmd, createOrderFingerprint)
+```
+
+### Builder
+
+```kotlin
+interface Builder {                                        // IdempotencyFingerprint.builder()
+    fun add(value: String?): Builder
+    fun add(value: Long?): Builder                         // also Int, Short, Byte
+    fun add(value: Boolean?): Builder
+    fun add(value: ByteArray?): Builder
+    fun add(value: List<*>?): Builder
+    fun add(value: IdempotencyFingerprint?): Builder
+    fun addNull(): Builder                                 // a bare add(null) is ambiguous
+    fun <T> add(value: T, mapper: IdempotencyFingerprintMapper<T>): Builder
+    fun build(): IdempotencyFingerprint
+}
+
+interface MappingBuilder : Builder {                       // IdempotencyFingerprints.builder()
+    override fun add(value: String?): MappingBuilder       // covariant overrides keep the
+    override fun add(value: Long?): MappingBuilder         // chain typed as MappingBuilder
+    override fun add(value: Boolean?): MappingBuilder
+    override fun add(value: ByteArray?): MappingBuilder
+    override fun add(value: List<*>?): MappingBuilder
+    override fun add(value: IdempotencyFingerprint?): MappingBuilder
+    override fun addNull(): MappingBuilder
+    override fun <T> add(value: T, mapper: IdempotencyFingerprintMapper<T>): MappingBuilder
+    fun add(value: Any?): MappingBuilder                   // mapper bean found by type
+}
+
+interface IdempotencyFingerprints {                        // Spring factory bean
+    fun builder(): MappingBuilder
+}
+```
+
+- The static builder serves code without Spring, such as plain Java, tests and
+  programmatic use. It supports built-in types and explicit mappers only, so a missing
+  mapper is a compile error there.
+- `MappingBuilder` overrides every `Builder` method with a covariant return type, so
+  built-in and by-type values can be added in any order.
+- The factory bean hands out a new builder per fingerprint, because builders are
+  mutable. There is one mapper registry per Once instance.
+- Mapper beans for built-in types are rejected at startup.
+- Mappers can use other mappers, explicitly or through `IdempotencyFingerprints`. Every
+  level is encoded as a nested fingerprint. The registry resolves mapper beans lazily,
+  so mapper beans can depend on `IdempotencyFingerprints`. Recursion ends with the data;
+  cyclic object graphs are the application's responsibility.
+- `add(Any?)` fails with the type name when no mapper is registered for it.
+
+### Reusing Conversions
+
+Two mechanisms are supported, and applications choose per use:
+
+- **Mapper registry (by type):** one rule per type for the whole Once instance.
+  ```kotlin
+  @Bean
+  fun money() = IdempotencyFingerprintMapper<BigDecimal> {
+      IdempotencyFingerprint.of(it.stripTrailingZeros().toPlainString())
+  }
+
+  fingerprints.builder().add(cmd.total)          // uses the BigDecimal mapper bean
+  ```
+- **Explicit mapper:** a mapper passed directly, for example an injected bean or a
+  pinned version.
+  ```kotlin
+  class CreateOrderFingerprint(private val money: IdempotencyFingerprintMapper<BigDecimal>) :
+      IdempotencyFingerprintMapper<CreateOrder> {
+      override fun map(subject: CreateOrder) =
+          IdempotencyFingerprint.builder()
+              .add(subject.customerId)
+              .add(subject.total, money)
+              .build()
+  }
+  ```
+
+A value converted by a mapper is encoded as a nested fingerprint, so `.add(total)` and
+`.add(total.toPlainString())` produce different digests.
+
+### Encoding
+
+| Tag | Type | Layout |
+|---|---|---|
+| `00` | NULL | tag |
+| `01` | STRING | tag + length (4) + UTF-8 bytes |
+| `02` | INTEGER | tag + length (4) + minimal two's complement |
+| `03` | BOOLEAN | tag + 1 byte |
+| `04` | BYTES | tag + length (4) + bytes |
+| `05` | LIST | tag + count (4) + elements |
+| `06` | NESTED | tag + count (4) + parts |
+
+- Lengths and counts are 4 bytes, big-endian. They come from a JVM `Int`.
+- Strings are not trimmed, case-folded or Unicode-normalized.
+- All integer types are widened: `42.toByte()`, `42` and `42L` encode the same way.
+- `null` carries no type.
+- Lists are ordered. Sets are converted with `.sorted()` by the mapper.
+- The fingerprint is the concatenation of its top-level parts. The digest is the
+  SHA-256 of those bytes, written as 64 lowercase hexadecimal characters.
+- `BigDecimal`, `Double`/`Float`, temporal types, `Map` and `Set` are not built in.
+  Mappers convert them.
+- Fixed test vectors in Once detect accidental changes. New types get new tags and do
+  not change existing digests.
+
+```
+"ab"                 01 00000002 6162
+42 / 42L             02 00000001 2A
+5_000_000_000L       02 00000005 012A05F200
+true                 03 01
+ByteArray[61, 62]    04 00000002 6162
+null                 00
+listOf("ab", null)   05 00000002 | 01 00000002 6162 | 00
+nested ["ab", 42]    06 00000002 | 01 00000002 6162 | 02 00000001 2A
+```
+
+### Storage
+
+A nullable column `request_fingerprint VARCHAR(255)` in every SQL dialect, and a field
+in MongoDB. The value is a list of `name=value` tags separated by `:`, followed by the
+digest. Defaults are omitted, so the common value is the bare digest.
+
+```
+3f2a…                    SHA-256, all mapper versions 1
+v=2:3f2a…                mapper version 2
+v=2,1:3f2a…              two top-level parts
+k=2026-11:v=2,1:3f2a…    HMAC with key 2026-11
+```
+
+| Tag | Meaning |
+|---|---|
+| `v` | Mapper version per top-level part. Always written for two or more parts. |
+| `k` | HMAC key ID. Its presence means HMAC-SHA-256. |
+| `e` | Reserved for an encoding version. Absent means encoding 1. |
+
+Tag order does not matter. Versions and key IDs may contain only `[A-Za-z0-9._-]`,
+validated at startup.
+
+### Comparison
+
+| Stored | Request | Result |
+|---|---|---|
+| `NULL` | anything | Duplicate |
+| value | no fingerprint | Duplicate |
+| unknown tag, unknown key or uncomputable version | value | Duplicate (not comparable) |
+| different `v`, mapper not versioned | value | Duplicate (not comparable) |
+| value | recomputed with stored `k` and `v`, equal | Duplicate |
+| value | recomputed with stored `k` and `v`, different | Mismatch |
+
+### To Be Considered
+
+**Versioned mappers:** an opt-in interface recomputes older versions, so mismatches
+stay detectable across definition changes.
+
+```kotlin
+interface VersionedIdempotencyFingerprintMapper<in T> : IdempotencyFingerprintMapper<T> {
+    val currentVersion: String                                     // configurable for two-phase rollouts
+    fun map(subject: T, version: String): IdempotencyFingerprint?  // null = no longer supported
+    override fun map(subject: T) = checkNotNull(map(subject, currentVersion))
+}
+```
+
+**Built-in HMAC:** configured keys, with old keys kept for verification until retention
+expires.
+
+```yaml
+namastack:
+  once:
+    fingerprint:
+      hmac:
+        current-key-id: "2026-11"
+        keys:
+          "2026-11": ${ONCE_FP_KEY_2026_11}
+          "2026-05": ${ONCE_FP_KEY_2026_05}   # verify only
+```
+
+An optional `IdempotencyFingerprintKeyProvider` SPI supplies keys from a vault.
+
+### Open Points
+
+- Built-in `UUID` and `Enum` support.
+- Whether built-in HMAC and versioned mappers are part of the first version.
