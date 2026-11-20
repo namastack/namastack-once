@@ -37,8 +37,9 @@ differ, and so can their digests:
 
 - `BigDecimal` values `19.9` and `19.90` are numerically equal but differ in scale,
   which depends on where the value came from (JSON, a database column, arithmetic).
-- `double` arithmetic is order-dependent (`0.1 + 0.2 != 0.3`), and the output of
-  `Double.toString` differs between Java 17 and later versions for some values.
+- `double` arithmetic rounds (`0.1 + 0.2 != 0.3`) and depends on evaluation order, and
+  the output of `Double.toString` differs between Java 17 and later versions for some
+  values.
 - Temporal values can be serialized at different precisions.
 - Maps and sets have no defined iteration order unless one is imposed.
 - General-purpose serializers (JSON, Java serialization) depend on library versions,
@@ -52,8 +53,8 @@ retries, or misses real differences.
 Fingerprinting affects several parts of the project at once:
 
 - **Public API:** the result type, the `@Idempotent` annotation and the programmatic
-  request gain new concepts.
-- **Persistence model:** the marker gains a column in every supported SQL dialect and
+  request may gain new concepts.
+- **Persistence model:** the marker may gain a column in every supported SQL dialect and
   a field in MongoDB.
 - **Compatibility:** stored fingerprints must stay comparable across instances, JVM
   versions, Once releases and changes to application code. A comparison that changes
@@ -110,8 +111,10 @@ must not rule them out.
 
 ## Considered Options
 
-The options are grouped by the question they answer. Each group is decided
-independently in the Decision section. Examples use Kotlin and the following command:
+The options are grouped by the question they answer. Some groups and options only apply
+after a choice in another group, or need metadata that a later group stores. These
+dependencies are stated in a **Depends on** line at the start of the group or below the
+option's description. Examples use Kotlin and the following command:
 
 ```kotlin
 data class CreateOrder(
@@ -152,9 +155,9 @@ DTO is marked the same way.
 ```kotlin
 data class CreateOrder(
     val requestId: UUID,
-    @IdempotencyFingerprint val customerId: String,
-    @IdempotencyFingerprint val total: BigDecimal,
-    val requestedAt: Instant,                         // ignored
+    @field:IdempotencyFingerprint val customerId: String,
+    @field:IdempotencyFingerprint val total: BigDecimal,
+    val requestedAt: Instant,                               // not part of the fingerprint
 )
 
 @Idempotent(scope = "order.create", key = "#cmd.requestId")
@@ -200,7 +203,7 @@ class CreateOrderFingerprint : IdempotencyFingerprintMapper<CreateOrder> {
 
 ### B. Attaching Mappers to a Declaration
 
-Applies to mappers (A4).
+**Depends on:** A4 (mappers).
 
 #### Option B1: Single mapper on `@Idempotent`
 
@@ -261,7 +264,7 @@ several.
 @Idempotent(scope = "invoice.listener", key = "#event.id")
 fun on(
     @IdempotencyFingerprint event: OrderPlaced,                             // mapper bean by type
-    @IdempotencyFingerprint(mapper = TenantFingerprint::class) tenant: String,
+    @IdempotencyFingerprint(mapper = TenantCodeFingerprint::class) tenant: String,
     @IdempotencyFingerprint(mapperBean = "regionFingerprint") region: String,
 )
 ```
@@ -353,8 +356,13 @@ data class Duplicate<T>(val context: IdempotencyDuplicateContext, val fingerprin
 
 ### D. Mismatch in Methods Without a Return Value
 
-Applies when the outcome is a result variant (C2 or C3). Methods returning
-`void`/`Unit`, typically message listeners, discard the result.
+**Depends on:** C2 or C3 (the mismatch is a result variant). Under C1, a mismatch throws
+in every method, and only a `SKIP` choice as in D4 changes that.
+
+Annotated methods returning `void`/`Unit` discard the result. This covers message
+listeners and every asynchronous `@Idempotent` method, which must return `void`/`Unit`.
+The programmatic `executeWithoutResult` returns an `IdempotencyResult` and is not
+affected.
 
 ```kotlin
 @Idempotent(scope = "invoice.listener", key = "#event.id", fingerprint = [OrderPlacedFingerprint::class])
@@ -367,8 +375,7 @@ Fingerprints are only valid on methods returning `IdempotencyResult`. Startup fa
 the listener above.
 
 - One way to report a mismatch, and nothing can be lost silently.
-- Excludes the main use case for void methods: message listeners that only need
-  deduplication.
+- Message listeners, a main motivating case, cannot use fingerprints at all.
 
 #### Option D2: Always throw
 
@@ -407,8 +414,8 @@ length or count, so different structures never produce the same bytes.
 
 #### Option E1: General-purpose serializer
 
-Values are serialized with a configured general-purpose serializer, for example
-canonical JSON, and the result is hashed.
+Values are serialized with a configured general-purpose serializer, for example a JSON
+library, and the result is hashed.
 
 - Works for any object with no mapper code.
 - Equality rules for numbers, time and collections are implicit and depend on library
@@ -416,7 +423,7 @@ canonical JSON, and the result is hashed.
   fingerprint.
 
 ```kotlin
-digest = sha256(canonicalJson.writeValueAsBytes(cmd))
+digest = sha256(objectMapper.writeValueAsBytes(cmd))
 // {"customerId":"c-42","total":19.90,...} ≠ {"customerId":"c-42","total":19.9,...}
 ```
 
@@ -437,12 +444,14 @@ IdempotencyFingerprint.of(cmd.customerId, cmd.total, cmd.requestedAt, mapOf("cha
 #### Option E3: Minimal canonical encoding plus mappers
 
 Once encodes only types with a single representation: strings, integers, booleans,
-byte arrays, null, lists and nested fingerprints. Other types are converted by
-application mappers.
+byte arrays, null, lists and nested fingerprints. Other types are converted to these by
+application code, for example inside a mapper (A4). Strings are encoded as UTF-8 without
+Unicode normalization, and all integer types encode the same way, so `42` and `42L`
+are equal.
 
 - Every equality decision lives in application code, where it is visible and
   versionable. The encoding is small enough to specify completely and keep stable.
-- Applications write mappers for common types such as `BigDecimal` and `Instant`.
+- Applications write conversions for common types such as `BigDecimal` and `Instant`.
 
 ```kotlin
 IdempotencyFingerprint.builder()
@@ -470,6 +479,8 @@ idempotency_hash = SHA-256(scope, key, fingerprint)
 
 A new nullable column `request_fingerprint` holds the fingerprint digest.
 
+**Depends on:** group G for the column type and the metadata stored next to the digest.
+
 - Small, and no request content is stored.
 - Shows that content differs, not where.
 
@@ -484,7 +495,8 @@ request_fingerprint VARCHAR(255) NULL  -- k=2026-11:v=2:3f2a…
 A new column holds the canonical fingerprint parts in readable form.
 
 - Mismatch diagnostics can show which part changed.
-- Stores business and possibly personal data of unbounded size in the marker table.
+- Contradicts the constraint that raw request content is never persisted. Stores
+  business and possibly personal data of unbounded size in the marker table.
 
 ```sql
 request_fingerprint_data TEXT NULL      -- ["c-42", "19.9"]
@@ -496,7 +508,8 @@ The fingerprint column holds one digest per top-level part instead of one combin
 digest.
 
 - Shows which argument changed without storing content.
-- Larger values and a more complex format for limited gain.
+- Larger values and a more complex format. A digest of a single low-entropy part is
+  easier to brute-force than one combined digest (see group J).
 
 ```sql
 request_fingerprint VARCHAR(...) NULL   -- 3f2a…,9b41…
@@ -504,9 +517,11 @@ request_fingerprint VARCHAR(...) NULL   -- 3f2a…,9b41…
 
 ### G. Format of the Stored Value
 
-Applies to F2. Comparing a stored digest later can require metadata next to it: mapper
-versions (group I), an HMAC key ID (group J) and, if ever needed, an encoding version
-(group H). These options decide whether and how that metadata is stored.
+**Depends on:** F2. The metadata comes from later groups: mapper versions (group I), an
+HMAC key ID (group J) and, if ever needed, an encoding version (group H).
+
+Comparing a stored digest later can require this metadata next to it. These options
+decide whether and how it is stored.
 
 #### Option G1: Digest only
 
@@ -524,8 +539,10 @@ request_fingerprint CHAR(64) NULL       -- 3f2a…
 
 The metadata is stored in separate columns next to a bare digest.
 
-- No parsing, same shape as the identity digest.
-- Every new concept requires a schema change in all dialects.
+- The digest keeps the shape of the identity digest, and each kind of metadata has its
+  own column.
+- Every new concept requires a schema change in all dialects. The versions column
+  still holds a list that has to be parsed.
 
 ```sql
 request_fingerprint        CHAR(64)    NULL,   -- 3f2a…
@@ -535,7 +552,8 @@ request_fingerprint_versions VARCHAR(50) NULL  -- 2,1
 
 #### Option G3: Positional prefixes
 
-The digest is preceded by positional prefixes for the scheme, key ID and versions.
+The digest is preceded by positional prefixes: a scheme (`s1` for SHA-256 or `h1` for
+HMAC, each with encoding version 1), then the key ID and the versions.
 
 - Compact.
 - Optional parts make positions ambiguous, and adding a part changes the format.
@@ -580,6 +598,8 @@ The encoding never changes, like the key hash. Stored values carry no encoding v
 Stored values carry an encoding version, and Once keeps older encoders to recompute
 them.
 
+**Depends on:** G2, G3 or G4 to store the encoding version.
+
 - Mistakes can be corrected without false mismatches.
 - Once maintains several encoders, and every stored value carries extra information.
 
@@ -593,6 +613,8 @@ e=2:9b41…    recomputed with encoder 2
 The encoding is kept minimal (E3) and extended only with new type tags. An encoding
 version tag is reserved, with absence meaning version 1, but not implemented.
 
+**Depends on:** E3, and G2, G3 or G4 to store the version once it is needed.
+
 - Stable in practice, with a way back that costs nothing today.
 - Relies on the minimal type set being specified correctly.
 
@@ -603,10 +625,11 @@ e=2:9b41…    reserved, only if an existing tag's encoding must ever change
 
 ### I. Changing a Fingerprint Definition
 
-The examples change this mapper by adding the delivery address:
+The examples assume `CreateOrder` gains a `deliveryAddress` property and change this
+mapper to include it:
 
 ```kotlin
-IdempotencyFingerprint.builder().add(subject.customerId).add(subject.total, Money).build()
+IdempotencyFingerprint.builder().add(subject.customerId).add(subject.total.toPlainString()).build()
 ```
 
 #### Option I1: Breaking change
@@ -622,6 +645,8 @@ mismatches until old markers expire.
 `IdempotencyFingerprintMapper` gains a `version` property, which is stored with the
 digest. Fingerprints with different versions are not compared.
 
+**Depends on:** G2, G3 or G4 to store the version.
+
 - No false mismatches.
 - Real mismatches across versions go undetected until old markers expire. Developers
   must remember to change the version.
@@ -630,7 +655,7 @@ digest. Fingerprints with different versions are not compared.
 class CreateOrderFingerprint : IdempotencyFingerprintMapper<CreateOrder> {
     override val version = "2"
     override fun map(subject: CreateOrder) =
-        IdempotencyFingerprint.builder().add(subject.customerId).add(subject.total, Money)
+        IdempotencyFingerprint.builder().add(subject.customerId).add(subject.total.toPlainString())
             .add(subject.deliveryAddress).build()
 }
 // stored v=1 vs computed v=2 → not comparable → Duplicate
@@ -641,6 +666,8 @@ class CreateOrderFingerprint : IdempotencyFingerprintMapper<CreateOrder> {
 As I2, but a `VersionedIdempotencyFingerprintMapper` can compute older versions, and
 Once recomputes the fingerprint in the stored version.
 
+**Depends on:** G2, G3 or G4 to store the version.
+
 - Mismatches stay detectable across changes.
 - Old mapping code must be kept until retention expires. Instances running only the old
   version still cannot compare against new rows without a two-phase rollout.
@@ -649,8 +676,8 @@ Once recomputes the fingerprint in the stored version.
 class CreateOrderFingerprint : VersionedIdempotencyFingerprintMapper<CreateOrder> {
     override val currentVersion = "2"
     override fun map(subject: CreateOrder, version: String) = when (version) {
-        "1" -> IdempotencyFingerprint.builder().add(subject.customerId).add(subject.total, Money).build()
-        "2" -> IdempotencyFingerprint.builder().add(subject.customerId).add(subject.total, Money)
+        "1" -> IdempotencyFingerprint.builder().add(subject.customerId).add(subject.total.toPlainString()).build()
+        "2" -> IdempotencyFingerprint.builder().add(subject.customerId).add(subject.total.toPlainString())
                    .add(subject.deliveryAddress).build()
         else -> null                                  // no longer supported
     }
@@ -668,8 +695,8 @@ Once computes the version from the sequence of part types, without their values.
   versions, hiding real mismatches.
 
 ```
-.add(customerId).add(total, Money)        shape STR, NESTED       → version hash(shape)
-.add(customerEmail).add(total, Money)     shape STR, NESTED       same version, different meaning
+.add(customerId).add(total.toPlainString())       shape STR, STR    → version hash(shape)
+.add(customerEmail).add(total.toPlainString())    shape STR, STR    same version, different meaning
 address = null  vs  address = "Main 1"    shape …, NULL vs …, STR different version for the same mapper
 ```
 
@@ -687,6 +714,10 @@ version = sha256(CreateOrderFingerprint.class bytes)
 
 ### J. Protecting Low-Entropy Content
 
+These options cover fingerprints only. The identity digest (`idempotency_hash`) is a
+plain SHA-256 of scope and key, so a low-entropy key can be guessed from it regardless
+of the option chosen here.
+
 #### Option J1: Plain SHA-256 only
 
 Fingerprints are always plain SHA-256 digests.
@@ -703,7 +734,8 @@ SHA-256("c-42" | "19.9")    can be found by trying all customer IDs and amounts
 Mappers hash their content with an application secret and add the result as bytes.
 
 - No support needed in Once.
-- No key ID is stored, so rotating the secret is a breaking change.
+- No key ID is stored. Rotating the secret is a breaking change unless the mapper
+  version changes with it (I2, I3).
 
 ```kotlin
 override fun map(subject: CreateOrder) =
@@ -715,8 +747,11 @@ override fun map(subject: CreateOrder) =
 Once computes HMAC-SHA-256 with configured keys and stores the key ID with the digest.
 Old keys stay configured for verification until retention expires.
 
-- Safe key rotation, and optional per instance.
-- Secret management, and an optional key provider SPI.
+**Depends on:** G2, G3 or G4 to store the key ID.
+
+- Safe key rotation. Applications without configured keys keep plain SHA-256.
+- Requires secret management and possibly a key provider SPI. All nodes that share a
+  marker table need the same key configuration.
 
 ```yaml
 namastack:
@@ -731,7 +766,8 @@ namastack:
 
 #### Option J4: Built-in HMAC trying all keys
 
-No key ID is stored. Once tries every configured key.
+No key ID is stored. Once tries every configured key, and plain SHA-256, until one
+matches.
 
 - No stored key ID.
 - Several digests per duplicate, and a removed key turns a valid retry into a false
@@ -742,6 +778,8 @@ stored 3f2a… → try HMAC(2026-11), HMAC(2026-05), SHA-256 → any match = Dup
 ```
 
 ### K. Reading the Stored Fingerprint on a Duplicate
+
+**Depends on:** F2 (a stored digest to read).
 
 A marker is reserved by inserting it. When the insert fails because the identity
 exists, the repository reports a duplicate (`IdempotencyMarkerRepository.reserve`
