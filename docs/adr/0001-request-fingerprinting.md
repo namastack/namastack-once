@@ -741,6 +741,80 @@ No key ID is stored. Once tries every configured key.
 stored 3f2a… → try HMAC(2026-11), HMAC(2026-05), SHA-256 → any match = Duplicate
 ```
 
+### K. Reading the Stored Fingerprint on a Duplicate
+
+A marker is reserved by inserting it. When the insert fails because the identity
+exists, the repository reports a duplicate (`IdempotencyMarkerRepository.reserve`
+returns `false`) and Once rolls the transaction back. The failed insert can leave the
+transaction unusable; PostgreSQL, for example, rejects every further statement. To
+compare fingerprints, Once must obtain the stored fingerprint of the existing marker.
+These options decide how, and what the repository SPI looks like as a result. Only
+declarations with a fingerprint need the stored value; others keep the single insert.
+
+#### Option K1: Read after rollback
+
+The repository keeps its insert. After the duplicate rolls back, Once reads the stored
+fingerprint with a separate query outside the owned transaction. The SPI gains a lookup
+method next to `reserve`.
+
+- No dialect-specific insert statements, and the reservation path stays unchanged for
+  every declaration.
+- A second round trip on each duplicate. The marker can disappear between rollback and
+  read (cleanup), or not be visible yet when the store reports a conflict with a
+  transaction that has not committed; the read then finds nothing and the stored
+  fingerprint is unknown.
+
+```kotlin
+interface IdempotencyMarkerRepository {
+    fun reserve(marker: IdempotencyMarker): Boolean
+    fun findFingerprint(keyHash: String): String?       // new, runs outside the owned transaction
+}
+```
+
+#### Option K2: Conditional insert, then read in the same transaction
+
+The repository inserts only when the identity is absent, using a statement that does
+not fail on conflict, and reads the existing marker in the same transaction. `reserve`
+returns the existing marker's fingerprint instead of a Boolean.
+
+- One transaction, which stays usable, and a single SPI call that answers both
+  questions.
+- Requires a conditional insert per store, each with its own conflict and locking
+  semantics: `INSERT … ON CONFLICT DO NOTHING` (PostgreSQL), `INSERT IGNORE` (MySQL,
+  MariaDB; also ignores other errors), `MERGE` (SQL Server, Oracle, H2) and an upsert
+  with `$setOnInsert` (MongoDB).
+
+```kotlin
+sealed interface Reservation {
+    data object Reserved : Reservation
+    data class Existing(val fingerprint: String?) : Reservation
+}
+
+interface IdempotencyMarkerRepository {
+    fun reserve(marker: IdempotencyMarker): Reservation
+}
+```
+```sql
+INSERT INTO once_marker (...) VALUES (...) ON CONFLICT (idempotency_hash) DO NOTHING;
+SELECT request_fingerprint FROM once_marker WHERE idempotency_hash = :keyHash;
+```
+
+#### Option K3: Read before insert
+
+Once reads the marker first. If it exists, its fingerprint is compared without
+inserting. Otherwise the insert follows as usual.
+
+- Simple statements in every store, and a duplicate never leaves the transaction
+  unusable when the marker was already committed.
+- An extra read on every fingerprinted invocation, including new ones. Two concurrent
+  invocations can both read nothing, so the insert conflict still has to be handled
+  with K1 or K2.
+
+```kotlin
+val stored = repository.findFingerprint(keyHash)
+    ?: return if (repository.reserve(marker)) execute() else readAfterRollback()
+```
+
 ## Decision
 
 TBD
@@ -756,252 +830,3 @@ TBD
 ## Follow-up Work
 
 TBD
-
-## Solution Implementation Details
-
-This section describes how the selected solution looks. It supports the decision process
-only and is removed before the ADR is accepted.
-
-### Outcome
-
-```kotlin
-sealed interface IdempotencyResult<T> {
-    data class Executed<T>(val value: T) : IdempotencyResult<T>
-    data class Duplicate<T>(val context: IdempotencyDuplicateContext) : IdempotencyResult<T>
-    data class Mismatch<T>(val context: IdempotencyDuplicateContext) : IdempotencyResult<T>
-}
-// fold(onExecuted, onDuplicate, onMismatch)
-```
-
-Methods without a return value choose per declaration with
-`@Idempotent(onMismatch = OnMismatch.SKIP | FAIL)`, defaulting to `SKIP`. `FAIL` throws
-`IdempotencyFingerprintMismatchException`. Every mismatch emits a metric, a tracing
-event and a WARN log.
-
-### Mapper
-
-One interface serves every role:
-
-```kotlin
-fun interface IdempotencyFingerprintMapper<in T> {
-    fun map(subject: T): IdempotencyFingerprint
-}
-```
-
-- **Top-level mapper:** selected by a declaration.
-- **Part mapper:** converts one value inside another fingerprint, found by type or
-  passed explicitly.
-
-### Declaration
-
-Fingerprinting is opt-in per declaration. A mapper bean never enables it on its own; a
-mapper bean that no declaration uses is logged once at INFO.
-
-**Method level:** an array of mapper classes. A class reference resolves to a bean of
-that class if one exists; otherwise Spring instantiates it. Each mapper is matched to
-exactly one parameter by its type `T`, and each parameter to at most one mapper. Parts
-are combined in array order. The empty default disables fingerprinting.
-
-```kotlin
-@Idempotent(scope = "order.create", key = "#cmd.requestId",
-            fingerprint = [CreateOrderFingerprint::class, TenantFingerprint::class])
-fun create(cmd: CreateOrder, tenant: TenantId): IdempotencyResult<Order>
-```
-
-**Parameter level:** for same-type parameters, bean names and whole-content
-fingerprints. Parts are combined in parameter order.
-
-```kotlin
-fun on(
-    @IdempotencyFingerprint event: OrderPlaced,                               // mapper bean by type
-    @IdempotencyFingerprint(mapper = TenantFingerprint::class) tenant: String,
-    @IdempotencyFingerprint(mapperBean = "regionFingerprint") region: String,
-)
-```
-
-Using both levels on one method fails at startup. There is no annotation on DTO
-classes.
-
-**Programmatic:**
-
-```kotlin
-request.withFingerprint(IdempotencyFingerprint.builder().add(cmd.customerId).build())
-request.withFingerprint(cmd, createOrderFingerprint)
-```
-
-### Builder
-
-```kotlin
-interface Builder {                                        // IdempotencyFingerprint.builder()
-    fun add(value: String?): Builder
-    fun add(value: Long?): Builder                         // also Int, Short, Byte
-    fun add(value: Boolean?): Builder
-    fun add(value: ByteArray?): Builder
-    fun add(value: List<*>?): Builder
-    fun add(value: IdempotencyFingerprint?): Builder
-    fun addNull(): Builder                                 // a bare add(null) is ambiguous
-    fun <T> add(value: T, mapper: IdempotencyFingerprintMapper<T>): Builder
-    fun build(): IdempotencyFingerprint
-}
-
-interface MappingBuilder : Builder {                       // IdempotencyFingerprints.builder()
-    override fun add(value: String?): MappingBuilder       // covariant overrides keep the
-    override fun add(value: Long?): MappingBuilder         // chain typed as MappingBuilder
-    override fun add(value: Boolean?): MappingBuilder
-    override fun add(value: ByteArray?): MappingBuilder
-    override fun add(value: List<*>?): MappingBuilder
-    override fun add(value: IdempotencyFingerprint?): MappingBuilder
-    override fun addNull(): MappingBuilder
-    override fun <T> add(value: T, mapper: IdempotencyFingerprintMapper<T>): MappingBuilder
-    fun add(value: Any?): MappingBuilder                   // mapper bean found by type
-}
-
-interface IdempotencyFingerprints {                        // Spring factory bean
-    fun builder(): MappingBuilder
-}
-```
-
-- The static builder serves code without Spring, such as plain Java, tests and
-  programmatic use. It supports built-in types and explicit mappers only, so a missing
-  mapper is a compile error there.
-- `MappingBuilder` overrides every `Builder` method with a covariant return type, so
-  built-in and by-type values can be added in any order.
-- The factory bean hands out a new builder per fingerprint, because builders are
-  mutable. There is one mapper registry per Once instance.
-- Mapper beans for built-in types are rejected at startup.
-- Mappers can use other mappers, explicitly or through `IdempotencyFingerprints`. Every
-  level is encoded as a nested fingerprint. The registry resolves mapper beans lazily,
-  so mapper beans can depend on `IdempotencyFingerprints`. Recursion ends with the data;
-  cyclic object graphs are the application's responsibility.
-- `add(Any?)` fails with the type name when no mapper is registered for it.
-
-### Reusing Conversions
-
-Two mechanisms are supported, and applications choose per use:
-
-- **Mapper registry (by type):** one rule per type for the whole Once instance.
-  ```kotlin
-  @Bean
-  fun money() = IdempotencyFingerprintMapper<BigDecimal> {
-      IdempotencyFingerprint.of(it.stripTrailingZeros().toPlainString())
-  }
-
-  fingerprints.builder().add(cmd.total)          // uses the BigDecimal mapper bean
-  ```
-- **Explicit mapper:** a mapper passed directly, for example an injected bean or a
-  pinned version.
-  ```kotlin
-  class CreateOrderFingerprint(private val money: IdempotencyFingerprintMapper<BigDecimal>) :
-      IdempotencyFingerprintMapper<CreateOrder> {
-      override fun map(subject: CreateOrder) =
-          IdempotencyFingerprint.builder()
-              .add(subject.customerId)
-              .add(subject.total, money)
-              .build()
-  }
-  ```
-
-A value converted by a mapper is encoded as a nested fingerprint, so `.add(total)` and
-`.add(total.toPlainString())` produce different digests.
-
-### Encoding
-
-| Tag | Type | Layout |
-|---|---|---|
-| `00` | NULL | tag |
-| `01` | STRING | tag + length (4) + UTF-8 bytes |
-| `02` | INTEGER | tag + length (4) + minimal two's complement |
-| `03` | BOOLEAN | tag + 1 byte |
-| `04` | BYTES | tag + length (4) + bytes |
-| `05` | LIST | tag + count (4) + elements |
-| `06` | NESTED | tag + count (4) + parts |
-
-- Lengths and counts are 4 bytes, big-endian. They come from a JVM `Int`.
-- Strings are not trimmed, case-folded or Unicode-normalized.
-- All integer types are widened: `42.toByte()`, `42` and `42L` encode the same way.
-- `null` carries no type.
-- Lists are ordered. Sets are converted with `.sorted()` by the mapper.
-- The fingerprint is the concatenation of its top-level parts. The digest is the
-  SHA-256 of those bytes, written as 64 lowercase hexadecimal characters.
-- `BigDecimal`, `Double`/`Float`, temporal types, `Map` and `Set` are not built in.
-  Mappers convert them.
-- Fixed test vectors in Once detect accidental changes. New types get new tags and do
-  not change existing digests.
-
-```
-"ab"                 01 00000002 6162
-42 / 42L             02 00000001 2A
-5_000_000_000L       02 00000005 012A05F200
-true                 03 01
-ByteArray[61, 62]    04 00000002 6162
-null                 00
-listOf("ab", null)   05 00000002 | 01 00000002 6162 | 00
-nested ["ab", 42]    06 00000002 | 01 00000002 6162 | 02 00000001 2A
-```
-
-### Storage
-
-A nullable column `request_fingerprint VARCHAR(255)` in every SQL dialect, and a field
-in MongoDB. The value is a list of `name=value` tags separated by `:`, followed by the
-digest. Defaults are omitted, so the common value is the bare digest.
-
-```
-3f2a…                    SHA-256, all mapper versions 1
-v=2:3f2a…                mapper version 2
-v=2,1:3f2a…              two top-level parts
-k=2026-11:v=2,1:3f2a…    HMAC with key 2026-11
-```
-
-| Tag | Meaning |
-|---|---|
-| `v` | Mapper version per top-level part. Always written for two or more parts. |
-| `k` | HMAC key ID. Its presence means HMAC-SHA-256. |
-| `e` | Reserved for an encoding version. Absent means encoding 1. |
-
-Tag order does not matter. Versions and key IDs may contain only `[A-Za-z0-9._-]`,
-validated at startup.
-
-### Comparison
-
-| Stored | Request | Result |
-|---|---|---|
-| `NULL` | anything | Duplicate |
-| value | no fingerprint | Duplicate |
-| unknown tag, unknown key or uncomputable version | value | Duplicate (not comparable) |
-| different `v`, mapper not versioned | value | Duplicate (not comparable) |
-| value | recomputed with stored `k` and `v`, equal | Duplicate |
-| value | recomputed with stored `k` and `v`, different | Mismatch |
-
-### To Be Considered
-
-**Versioned mappers:** an opt-in interface recomputes older versions, so mismatches
-stay detectable across definition changes.
-
-```kotlin
-interface VersionedIdempotencyFingerprintMapper<in T> : IdempotencyFingerprintMapper<T> {
-    val currentVersion: String                                     // configurable for two-phase rollouts
-    fun map(subject: T, version: String): IdempotencyFingerprint?  // null = no longer supported
-    override fun map(subject: T) = checkNotNull(map(subject, currentVersion))
-}
-```
-
-**Built-in HMAC:** configured keys, with old keys kept for verification until retention
-expires.
-
-```yaml
-namastack:
-  once:
-    fingerprint:
-      hmac:
-        current-key-id: "2026-11"
-        keys:
-          "2026-11": ${ONCE_FP_KEY_2026_11}
-          "2026-05": ${ONCE_FP_KEY_2026_05}   # verify only
-```
-
-An optional `IdempotencyFingerprintKeyProvider` SPI supplies keys from a vault.
-
-### Open Points
-
-- Built-in `UUID` and `Enum` support.
-- Whether built-in HMAC and versioned mappers are part of the first version.
