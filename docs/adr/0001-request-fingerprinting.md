@@ -885,11 +885,6 @@ sealed interface IdempotencyResult<T> {
 // fold(onExecuted, onDuplicate, onMismatch)
 ```
 
-Methods without a return value choose per declaration with
-`@Idempotent(onMismatch = OnMismatch.SKIP | FAIL)`, defaulting to `SKIP`. `FAIL` throws
-`IdempotencyFingerprintMismatchException`. Every mismatch emits a metric, a tracing
-event and a WARN log.
-
 ### Mapper
 
 One interface serves every role:
@@ -945,8 +940,8 @@ request.withFingerprint(cmd, createOrderFingerprint)
 
 ```kotlin
 interface Builder {                                        // IdempotencyFingerprint.builder()
-    fun add(value: String?): Builder
-    fun add(value: Long?): Builder                         // also Int, Short, Byte
+    fun add(value: String?): Builder                       // also Char
+    fun add(value: Long?): Builder                         // also Int, Short, Byte, BigInteger
     fun add(value: Boolean?): Builder
     fun add(value: ByteArray?): Builder
     fun add(value: List<*>?): Builder
@@ -986,6 +981,8 @@ interface IdempotencyFingerprints {                        // Spring factory bea
   so mapper beans can depend on `IdempotencyFingerprints`. Recursion ends with the data;
   cyclic object graphs are the application's responsibility.
 - `add(Any?)` fails with the type name when no mapper is registered for it.
+- Each built-in type has its own overload, because Kotlin does not widen numbers and
+  Java does not widen boxed values. List elements accept the same built-in types.
 
 ### Reusing Conversions
 
@@ -1030,7 +1027,10 @@ A value converted by a mapper is encoded as a nested fingerprint, so `.add(total
 
 - Lengths and counts are 4 bytes, big-endian. They come from a JVM `Int`.
 - Strings are not trimmed, case-folded or Unicode-normalized.
-- All integer types are widened: `42.toByte()`, `42` and `42L` encode the same way.
+- All integer types are widened: `42.toByte()`, `42`, `42L` and `BigInteger.valueOf(42)`
+  encode the same way. `BigInteger.toByteArray()` already gives the minimal two's
+  complement, so there is no size limit.
+- A `Char` is encoded as a one-character string, so `'a'` and `"a"` are equal.
 - `null` carries no type.
 - Lists are ordered. Sets are converted with `.sorted()` by the mapper.
 - The fingerprint is the concatenation of its top-level parts. The digest is the
