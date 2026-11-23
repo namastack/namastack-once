@@ -1,7 +1,7 @@
 [versions]
 kotlin = "2.4.21"
 namastackOnce = "0.1.0-SNAPSHOT"
-springBoot = "4.1.2"
+springBoot = "4.2.0"
 springModulith = "2.1.2"
 dependencyManagement = "1.1.7"
 testcontainers = "2.0.5"
